@@ -1,0 +1,28 @@
+# Sybil configuration example
+
+[storage]
+endpoint = "https://fly.storage.tigris.dev"
+bucket = "sybil"
+region = "auto"
+
+[server]
+host = "0.0.0.0"
+port = 8080
+
+[indexer]
+# Maximum time before flushing buffer to S3 (seconds)
+flush_interval_secs = 10
+# Target L0 segment size (bytes)
+segment_size_bytes = 65536  # 64KB
+
+[querier]
+# NVMe cache directory path
+cache_dir = "/var/cache/sybil"
+# Maximum cache size (bytes)
+cache_size_bytes = 10737418240  # 10GB
+
+[steward]
+# L0 segment count threshold for compaction
+compaction_threshold = 10
+# Number of concurrent worker tasks
+worker_count = 10
