@@ -4,7 +4,7 @@
 //! service (AWS S3, Tigris, MinIO, R2, etc.) via endpoint configuration.
 
 use bytes::Bytes;
-use object_store::aws::AmazonS3Builder;
+use object_store::aws::{AmazonS3Builder, S3ConditionalPut};
 use object_store::path::Path;
 use object_store::{ObjectStore as ObjectStoreExt, PutMode, PutOptions, PutPayload, UpdateVersion};
 
@@ -48,7 +48,15 @@ impl S3Store {
 
         if let Some(endpoint) = endpoint {
             builder = builder.with_endpoint(endpoint);
+
+            // Allow HTTP for local development/testing endpoints
+            if endpoint.starts_with("http://") {
+                builder = builder.with_allow_http(true);
+            }
         }
+
+        // Enable conditional put for immutability checks (if-none-match header)
+        builder = builder.with_conditional_put(S3ConditionalPut::ETagMatch);
 
         let inner = builder.build().map_err(|e| StorageError::Io(e.into()))?;
 
@@ -68,10 +76,19 @@ impl S3Store {
     }
 
     fn convert_error(key: &str, err: object_store::Error) -> StorageError {
-        match err {
+        match &err {
             object_store::Error::NotFound { .. } => StorageError::not_found(key),
             object_store::Error::AlreadyExists { .. } => StorageError::already_exists(key),
             object_store::Error::Precondition { .. } => StorageError::conflict(key),
+            object_store::Error::Generic { source, .. } => {
+                // Check for S3 InvalidRange error (HTTP 416)
+                let source_str = source.to_string();
+                if source_str.contains("416") || source_str.contains("InvalidRange") {
+                    StorageError::invalid_range(key, "range not satisfiable")
+                } else {
+                    StorageError::Io(err.into())
+                }
+            }
             _ => StorageError::Io(err.into()),
         }
     }

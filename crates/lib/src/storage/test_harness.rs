@@ -233,7 +233,12 @@ pub mod object_store_tests {
             .put_if_match(&key, Bytes::from("data"), "etag")
             .await;
 
-        assert!(matches!(result, Err(StorageError::NotFound { .. })));
+        // S3-compatible stores return 412 PreconditionFailed for non-existent objects,
+        // while in-memory store returns NotFound. Both are acceptable.
+        assert!(matches!(
+            result,
+            Err(StorageError::NotFound { .. }) | Err(StorageError::Conflict { .. })
+        ));
     }
 
     pub async fn test_delete<S: ObjectStore>(h: &TestHarness<S>) {

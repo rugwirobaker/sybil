@@ -1,19 +1,14 @@
 //! S3Store tests.
 //!
-//! Includes both unit tests and integration tests using rustfs via testcontainers.
-//! Integration tests require Docker to be running.
+//! Includes both unit tests and integration tests using Tigris (S3-compatible).
+//! Integration tests require a `.tigris.creds` file in the workspace root.
 
 use super::*;
+use crate::storage::engine::ObjectStore;
 use crate::storage::test_harness::{object_store_tests, TestHarness};
 
-use std::time::Duration;
-use testcontainers::core::{ContainerPort, ContainerRequest, WaitFor};
-use testcontainers::runners::AsyncRunner;
-use testcontainers::{GenericImage, ImageExt};
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Unit tests
-// ─────────────────────────────────────────────────────────────────────────────
+use std::collections::HashMap;
+use std::path::Path;
 
 #[test]
 fn test_new_builds_store() {
@@ -29,94 +24,105 @@ fn test_new_builds_store() {
     assert!(result.is_ok());
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Integration tests (require Docker)
-// ─────────────────────────────────────────────────────────────────────────────
-
-/// Default credentials for rustfs.
-const RUSTFS_USER: &str = "rustfsadmin";
-const RUSTFS_PASSWORD: &str = "rustfsadmin";
-const RUSTFS_BUCKET: &str = "test-bucket";
-
-/// Create a rustfs container image configured for testing.
-fn rustfs_image() -> ContainerRequest<GenericImage> {
-    GenericImage::new("rustfs/rustfs", "latest")
-        .with_wait_for(WaitFor::message_on_stderr("API:"))
-        .with_exposed_port(ContainerPort::Tcp(9000))
-        .with_env_var("RUSTFS_ROOT_USER", RUSTFS_USER)
-        .with_env_var("RUSTFS_ROOT_PASSWORD", RUSTFS_PASSWORD)
+/// Configuration for Tigris S3-compatible storage.
+struct TigrisConfig {
+    endpoint: String,
+    region: String,
+    access_key: String,
+    secret_key: String,
+    bucket: String,
 }
 
-/// Create an S3Store connected to the rustfs container.
-fn create_store(host_port: u16) -> S3Store {
-    let endpoint = format!("http://127.0.0.1:{}", host_port);
+impl TigrisConfig {
+    /// Load configuration from `.tigris.creds` file.
+    /// Format: KEY: value (one per line)
+    fn from_creds_file(path: &Path) -> Option<Self> {
+        let content = std::fs::read_to_string(path).ok()?;
 
+        let creds: HashMap<&str, &str> = content
+            .lines()
+            .filter_map(|line| {
+                let mut parts = line.splitn(2, ':');
+                let key = parts.next()?.trim();
+                let value = parts.next()?.trim();
+                Some((key, value))
+            })
+            .collect();
+
+        Some(Self {
+            endpoint: creds.get("AWS_ENDPOINT_URL_S3")?.to_string(),
+            region: creds.get("AWS_REGION")?.to_string(),
+            access_key: creds.get("AWS_ACCESS_KEY_ID")?.to_string(),
+            secret_key: creds.get("AWS_SECRET_ACCESS_KEY")?.to_string(),
+            bucket: creds.get("BUCKET_NAME")?.to_string(),
+        })
+    }
+}
+
+/// Create an S3Store connected to Tigris.
+fn create_store(config: &TigrisConfig) -> S3Store {
     S3Store::new(
-        RUSTFS_BUCKET,
-        "us-east-1",
-        Some(&endpoint),
-        RUSTFS_USER,
-        RUSTFS_PASSWORD,
+        &config.bucket,
+        &config.region,
+        Some(&config.endpoint),
+        &config.access_key,
+        &config.secret_key,
     )
     .expect("failed to create S3Store")
 }
 
-/// Create a bucket in rustfs (auto-created on first write).
-async fn ensure_bucket(host_port: u16) {
-    use object_store::aws::AmazonS3Builder;
-    use object_store::ObjectStore as _;
+/// Find the workspace root by looking for Cargo.toml with [workspace].
+fn find_workspace_root() -> Option<std::path::PathBuf> {
+    let mut dir = std::env::current_dir().ok()?;
+    loop {
+        let cargo_toml = dir.join("Cargo.toml");
+        if cargo_toml.exists() {
+            let content = std::fs::read_to_string(&cargo_toml).ok()?;
+            if content.contains("[workspace]") {
+                return Some(dir);
+            }
+        }
+        if !dir.pop() {
+            return None;
+        }
+    }
+}
 
-    let endpoint = format!("http://127.0.0.1:{}", host_port);
-
-    let store = AmazonS3Builder::new()
-        .with_endpoint(&endpoint)
-        .with_bucket_name(RUSTFS_BUCKET)
-        .with_region("us-east-1")
-        .with_access_key_id(RUSTFS_USER)
-        .with_secret_access_key(RUSTFS_PASSWORD)
-        .with_allow_http(true)
-        .build()
-        .expect("failed to build store for bucket creation");
-
-    // Put a dummy object to implicitly create the bucket
-    let _ = store
-        .put(
-            &object_store::path::Path::from("_init"),
-            bytes::Bytes::new().into(),
-        )
-        .await;
-
-    // Clean it up
-    let _ = store
-        .delete(&object_store::path::Path::from("_init"))
-        .await;
+/// Clean up stale test data from previous runs that may have failed.
+async fn cleanup_stale_test_data(store: &S3Store) {
+    // List all objects with _test_ prefix and delete them
+    if let Ok(keys) = store.list("_test_").await {
+        for key in keys {
+            let _ = store.delete(&key).await;
+        }
+    }
 }
 
 #[tokio::test]
 async fn s3_conformance() {
-    // Start rustfs container
-    let container = match rustfs_image().start().await {
-        Ok(c) => c,
-        Err(e) => {
-            eprintln!("Skipping S3 integration test: failed to start container: {e}");
-            eprintln!("Is Docker running?");
+    let workspace_root = match find_workspace_root() {
+        Some(r) => r,
+        None => {
+            eprintln!("Skipping S3 integration test: could not find workspace root");
             return;
         }
     };
 
-    let host_port = container
-        .get_host_port_ipv4(9000)
-        .await
-        .expect("failed to get host port");
+    let creds_path = workspace_root.join(".tigris.creds");
+    let config = match TigrisConfig::from_creds_file(&creds_path) {
+        Some(c) => c,
+        None => {
+            eprintln!("Skipping S3 integration test: .tigris.creds not found or invalid");
+            eprintln!("Create .tigris.creds with: AWS_ENDPOINT_URL_S3, AWS_REGION, AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, BUCKET_NAME");
+            return;
+        }
+    };
 
-    // Give rustfs a moment to fully initialize
-    tokio::time::sleep(Duration::from_millis(500)).await;
+    let store = create_store(&config);
 
-    // Ensure the bucket exists
-    ensure_bucket(host_port).await;
+    // Clean up any stale test data from previous failed runs
+    cleanup_stale_test_data(&store).await;
 
-    // Create store and run conformance tests
-    let store = create_store(host_port);
     let harness = TestHarness::new(store);
 
     object_store_tests::run_all(&harness).await;
