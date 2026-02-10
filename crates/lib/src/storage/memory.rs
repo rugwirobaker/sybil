@@ -3,7 +3,7 @@ use std::sync::RwLock;
 
 use bytes::Bytes;
 
-use super::engine::{ObjectStore, Result};
+use super::engine::{ByteRange, ObjectStore, Result};
 use super::error::StorageError;
 
 /// In-memory object store for testing.
@@ -51,6 +51,59 @@ impl ObjectStore for MemoryStore {
             .get(key)
             .map(|obj| (obj.data.clone(), obj.etag.clone()))
             .ok_or_else(|| StorageError::not_found(key))
+    }
+
+    async fn get_range(&self, key: &str, range: ByteRange) -> Result<Bytes> {
+        let objects = self.objects.read().unwrap();
+        let obj = objects
+            .get(key)
+            .ok_or_else(|| StorageError::not_found(key))?;
+
+        let len = obj.data.len() as u64;
+
+        let (start, end) = match range {
+            ByteRange::Range { start, end } => {
+                if start > end {
+                    return Err(StorageError::invalid_range(
+                        key,
+                        format!("start ({}) > end ({})", start, end),
+                    ));
+                }
+                (start, end)
+            }
+            ByteRange::From(offset) => {
+                if offset >= len {
+                    return Err(StorageError::invalid_range(
+                        key,
+                        format!("offset {} >= object size {}", offset, len),
+                    ));
+                }
+                (offset, len - 1)
+            }
+            ByteRange::Suffix(suffix_len) => {
+                if suffix_len == 0 {
+                    return Err(StorageError::invalid_range(key, "suffix length is 0"));
+                }
+                if suffix_len > len {
+                    // S3 behavior: return entire object if suffix > size
+                    (0, len - 1)
+                } else {
+                    (len - suffix_len, len - 1)
+                }
+            }
+        };
+
+        // Clamp end to object bounds (S3 behavior)
+        let end = end.min(len - 1);
+
+        if start >= len {
+            return Err(StorageError::invalid_range(
+                key,
+                format!("start ({}) >= object size ({})", start, len),
+            ));
+        }
+
+        Ok(obj.data.slice(start as usize..=end as usize))
     }
 
     async fn put(&self, key: &str, data: Bytes) -> Result<()> {
@@ -242,5 +295,116 @@ mod tests {
         store.put(key, Bytes::from("data")).await.unwrap();
 
         assert!(store.exists(key).await.unwrap());
+    }
+
+    #[tokio::test]
+    async fn test_get_range_specific() {
+        let store = MemoryStore::new();
+        let key = "test/object.txt";
+        store.put(key, Bytes::from("hello world")).await.unwrap();
+
+        // Bytes 0-4 inclusive = "hello"
+        let data = store
+            .get_range(key, ByteRange::Range { start: 0, end: 4 })
+            .await
+            .unwrap();
+        assert_eq!(data, Bytes::from("hello"));
+
+        // Bytes 6-10 inclusive = "world"
+        let data = store
+            .get_range(key, ByteRange::Range { start: 6, end: 10 })
+            .await
+            .unwrap();
+        assert_eq!(data, Bytes::from("world"));
+    }
+
+    #[tokio::test]
+    async fn test_get_range_from_offset() {
+        let store = MemoryStore::new();
+        let key = "test/object.txt";
+        store.put(key, Bytes::from("hello world")).await.unwrap();
+
+        // From byte 6 to end = "world"
+        let data = store
+            .get_range(key, ByteRange::From(6))
+            .await
+            .unwrap();
+        assert_eq!(data, Bytes::from("world"));
+    }
+
+    #[tokio::test]
+    async fn test_get_range_suffix() {
+        let store = MemoryStore::new();
+        let key = "test/object.txt";
+        store.put(key, Bytes::from("hello world")).await.unwrap();
+
+        // Last 5 bytes = "world"
+        let data = store
+            .get_range(key, ByteRange::Suffix(5))
+            .await
+            .unwrap();
+        assert_eq!(data, Bytes::from("world"));
+    }
+
+    #[tokio::test]
+    async fn test_get_range_suffix_larger_than_object() {
+        let store = MemoryStore::new();
+        let key = "test/object.txt";
+        store.put(key, Bytes::from("hello")).await.unwrap();
+
+        // Request last 100 bytes, object is only 5 bytes - returns entire object
+        let data = store
+            .get_range(key, ByteRange::Suffix(100))
+            .await
+            .unwrap();
+        assert_eq!(data, Bytes::from("hello"));
+    }
+
+    #[tokio::test]
+    async fn test_get_range_clamps_end() {
+        let store = MemoryStore::new();
+        let key = "test/object.txt";
+        store.put(key, Bytes::from("hello")).await.unwrap();
+
+        // Request bytes 0-100, object is only 5 bytes - clamps to 0-4
+        let data = store
+            .get_range(key, ByteRange::Range { start: 0, end: 100 })
+            .await
+            .unwrap();
+        assert_eq!(data, Bytes::from("hello"));
+    }
+
+    #[tokio::test]
+    async fn test_get_range_invalid_start_greater_than_end() {
+        let store = MemoryStore::new();
+        let key = "test/object.txt";
+        store.put(key, Bytes::from("hello")).await.unwrap();
+
+        let result = store
+            .get_range(key, ByteRange::Range { start: 5, end: 2 })
+            .await;
+        assert!(matches!(result, Err(StorageError::InvalidRange { .. })));
+    }
+
+    #[tokio::test]
+    async fn test_get_range_invalid_start_beyond_object() {
+        let store = MemoryStore::new();
+        let key = "test/object.txt";
+        store.put(key, Bytes::from("hello")).await.unwrap();
+
+        let result = store
+            .get_range(key, ByteRange::Range { start: 10, end: 15 })
+            .await;
+        assert!(matches!(result, Err(StorageError::InvalidRange { .. })));
+    }
+
+    #[tokio::test]
+    async fn test_get_range_not_found() {
+        let store = MemoryStore::new();
+
+        let result = store
+            .get_range("nonexistent", ByteRange::Range { start: 0, end: 10 })
+            .await;
+        assert!(matches!(result, Err(StorageError::NotFound { .. })));
     }
 }

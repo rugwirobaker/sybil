@@ -6,6 +6,36 @@ use super::error::StorageError;
 pub type Result<T> = std::result::Result<T, StorageError>;
 
 // ─────────────────────────────────────────────────────────────────────────────
+// ByteRange
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Specifies a byte range for partial object reads.
+///
+/// Maps directly to S3's Range header capabilities:
+/// - `Range { start, end }` → `Range: bytes=start-end`
+/// - `From(offset)` → `Range: bytes=offset-`
+/// - `Suffix(len)` → `Range: bytes=-len`
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ByteRange {
+    /// Bytes from start to end (inclusive on both ends).
+    Range { start: u64, end: u64 },
+    /// From offset to end of object.
+    From(u64),
+    /// Last `len` bytes of the object.
+    Suffix(u64),
+}
+
+impl std::fmt::Display for ByteRange {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ByteRange::Range { start, end } => write!(f, "bytes {}-{}", start, end),
+            ByteRange::From(offset) => write!(f, "bytes {}-", offset),
+            ByteRange::Suffix(len) => write!(f, "last {} bytes", len),
+        }
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // ObjectStore trait
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -21,6 +51,12 @@ pub trait ObjectStore: Send + Sync {
 
     /// Get an object with its ETag (for conditional updates).
     async fn get_with_etag(&self, key: &str) -> Result<(Bytes, String)>;
+
+    /// Get a byte range from an object.
+    ///
+    /// Returns `InvalidRange` if the range cannot be satisfied (e.g., object
+    /// is smaller than requested range, or start > end).
+    async fn get_range(&self, key: &str, range: ByteRange) -> Result<Bytes>;
 
     /// Put an object.
     async fn put(&self, key: &str, data: Bytes) -> Result<()>;

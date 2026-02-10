@@ -9,6 +9,10 @@ pub enum StorageError {
     #[error("conflict: {key} was modified")]
     Conflict { key: String },
 
+    /// Invalid byte range for the object.
+    #[error("invalid range for {key}: {reason}")]
+    InvalidRange { key: String, reason: String },
+
     /// I/O error (network, filesystem, etc).
     #[error("io: {0}")]
     Io(#[from] std::io::Error),
@@ -25,6 +29,13 @@ impl StorageError {
 
     pub fn conflict(key: impl Into<String>) -> Self {
         Self::Conflict { key: key.into() }
+    }
+
+    pub fn invalid_range(key: impl Into<String>, reason: impl Into<String>) -> Self {
+        Self::InvalidRange {
+            key: key.into(),
+            reason: reason.into(),
+        }
     }
 
     pub fn serialization(msg: impl Into<String>) -> Self {
