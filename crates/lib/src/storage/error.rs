@@ -5,7 +5,17 @@ pub enum StorageError {
     #[error("not found: {key}")]
     NotFound { key: String },
 
-    /// Conflict - object was modified concurrently.
+    /// Object already exists (for immutable/create-only operations).
+    ///
+    /// This indicates a programming error (e.g., ULID collision, duplicate write).
+    /// Should never happen in normal operation.
+    #[error("already exists: {key}")]
+    AlreadyExists { key: String },
+
+    /// Conflict - ETag mismatch during conditional update.
+    ///
+    /// Expected during concurrent modifications to head.json.
+    /// Caller should retry with fresh ETag.
     #[error("conflict: {key} was modified")]
     Conflict { key: String },
 
@@ -25,6 +35,10 @@ pub enum StorageError {
 impl StorageError {
     pub fn not_found(key: impl Into<String>) -> Self {
         Self::NotFound { key: key.into() }
+    }
+
+    pub fn already_exists(key: impl Into<String>) -> Self {
+        Self::AlreadyExists { key: key.into() }
     }
 
     pub fn conflict(key: impl Into<String>) -> Self {

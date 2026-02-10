@@ -5,12 +5,21 @@ edition.workspace = true
 license.workspace = true
 authors.workspace = true
 
+[features]
+default = []
+# Enable test harness for use in other crates' tests
+test-harness = []
+
 [dependencies]
 serde = { workspace = true }
 toml = { workspace = true }
 thiserror = { workspace = true }
 async-trait = { workspace = true }
 bytes = { workspace = true }
+object_store = { workspace = true }
+url = { workspace = true }
+futures = { workspace = true }
 
 [dev-dependencies]
 tokio = { workspace = true }
+testcontainers = { workspace = true }
