@@ -37,8 +37,8 @@ Here are some tools at your disposal. They should make some specif worflows easi
 
 ## After making changes
 
-1. Hid our lord and savior clippy: Run cargo clippy and fix any complaints it might have.
-2. Format the code: with cargo fmt
+1. Hid our lord and savior clippy: Run cargo clippy and fix any complaints it might have. Unless the changes where to documentation.
+2. Format the code: with cargo fmt. Unless the changes where to documentation.
 3. Run tests: make sure tests on affected code still pass and expand with more tests if necessary.
 
 ## Inspirations
