@@ -72,20 +72,19 @@ impl BloomCache {
     /// - `Some(true)` if the bloom filter says it might contain the value
     /// - `Some(false)` if the bloom filter says it definitely doesn't
     /// - `None` if the bloom filter is not cached
-    pub fn check(&self, segment_key: &str, field_id: u8, value: &[u8]) -> Option<bool> {
-        self.get(segment_key, field_id)
-            .map(|bloom| bloom.might_contain(value))
+    pub fn check(&self, key: &BloomKey, value: &[u8]) -> Option<bool> {
+        self.get(key).map(|bloom| bloom.might_contain(value))
     }
 
     /// Get a specific bloom filter.
-    pub fn get(&self, segment_key: &str, field_id: u8) -> Option<BloomFilter> {
+    pub fn get(&self, key: &BloomKey) -> Option<BloomFilter> {
         if !self.enabled {
             return None;
         }
 
         let inner = self.inner.read();
-        if let Some(field_blooms) = inner.segments.get(segment_key) {
-            if let Some(bloom) = field_blooms.get(&field_id) {
+        if let Some(field_blooms) = inner.segments.get(&key.segment_key) {
+            if let Some(bloom) = field_blooms.get(&key.field_id) {
                 self.metrics.record_hit();
                 return Some(bloom.clone());
             }
@@ -221,13 +220,15 @@ mod tests {
         let bloom = make_bloom(&[b"error", b"warn"]);
         cache.insert("segment-001", 8, bloom);
 
+        let key = BloomKey::new("segment-001", 8);
+
         // Should find "error"
-        let result = cache.check("segment-001", 8, b"error");
+        let result = cache.check(&key, b"error");
         assert_eq!(result, Some(true));
 
         // Should not find "info" (definitely not in bloom)
         // Note: this could be a false positive, but unlikely with small set
-        let result = cache.check("segment-001", 8, b"definitely_not_there_xyz");
+        let result = cache.check(&key, b"definitely_not_there_xyz");
         // Can't assert false due to FP possibility, but at least it returns Some
         assert!(result.is_some());
 
@@ -239,7 +240,8 @@ mod tests {
         let metrics = Arc::new(LayerMetrics::new());
         let cache = BloomCache::new(&test_config(), Arc::clone(&metrics));
 
-        let result = cache.check("nonexistent", 0, b"value");
+        let key = BloomKey::new("nonexistent", 0);
+        let result = cache.check(&key, b"value");
         assert!(result.is_none());
         assert_eq!(metrics.snapshot().misses, 1);
     }
@@ -259,8 +261,12 @@ mod tests {
         assert_eq!(cache.segment_count(), 1);
         assert_eq!(cache.bloom_count(), 2);
 
-        assert!(cache.check("segment-001", 0, b"api").is_some());
-        assert!(cache.check("segment-001", 8, b"error").is_some());
+        assert!(cache
+            .check(&BloomKey::new("segment-001", 0), b"api")
+            .is_some());
+        assert!(cache
+            .check(&BloomKey::new("segment-001", 8), b"error")
+            .is_some());
     }
 
     #[test]
@@ -281,8 +287,12 @@ mod tests {
 
         assert_eq!(cache.segment_count(), 1);
         assert_eq!(cache.bloom_count(), 1);
-        assert!(cache.check("segment-001", 0, b"api").is_none());
-        assert!(cache.check("segment-002", 0, b"web").is_some());
+        assert!(cache
+            .check(&BloomKey::new("segment-001", 0), b"api")
+            .is_none());
+        assert!(cache
+            .check(&BloomKey::new("segment-002", 0), b"web")
+            .is_some());
     }
 
     #[test]
@@ -317,7 +327,9 @@ mod tests {
 
         cache.insert("segment-001", 0, make_bloom(&[b"test"]));
 
-        assert!(cache.check("segment-001", 0, b"test").is_none());
+        assert!(cache
+            .check(&BloomKey::new("segment-001", 0), b"test")
+            .is_none());
         assert_eq!(cache.segment_count(), 0);
     }
 }

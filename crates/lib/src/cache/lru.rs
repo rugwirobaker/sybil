@@ -68,25 +68,16 @@ pub struct EntryMeta {
     /// Size of this entry in bytes.
     pub size_bytes: u64,
     /// Minimum timestamp in the data (for time-biased eviction).
-    pub min_timestamp: Option<i64>,
+    pub min_timestamp: i64,
 }
 
 impl EntryMeta {
-    /// Create new metadata with the given size.
-    pub fn new(size_bytes: u64) -> Self {
+    /// Create new metadata with the given size and timestamp.
+    pub fn new(size_bytes: u64, min_timestamp: i64) -> Self {
         Self {
             last_access: Instant::now(),
             size_bytes,
-            min_timestamp: None,
-        }
-    }
-
-    /// Create new metadata with size and timestamp.
-    pub fn with_timestamp(size_bytes: u64, min_timestamp: i64) -> Self {
-        Self {
-            last_access: Instant::now(),
-            size_bytes,
-            min_timestamp: Some(min_timestamp),
+            min_timestamp,
         }
     }
 
@@ -227,12 +218,8 @@ impl<K: Eq + Hash + Clone, V: Clone> TimeBiasedLru<K, V> {
         let access_recency = 1.0 / (1.0 + access_age_secs / 60.0); // Half-life of 1 minute
 
         // Timestamp recency: 1.0 for current time, decays for older data
-        let timestamp_recency = if let Some(min_ts) = meta.min_timestamp {
-            let age_hours = (current_ts - min_ts) as f64 / 3_600_000.0;
-            1.0 / (1.0 + age_hours / 24.0) // Half-life of 1 day
-        } else {
-            0.5 // Neutral if no timestamp
-        };
+        let age_hours = (current_ts - meta.min_timestamp) as f64 / 3_600_000.0;
+        let timestamp_recency = 1.0 / (1.0 + age_hours / 24.0); // Half-life of 1 day
 
         // Combine scores
         access_recency * (1.0 - self.time_bias) + timestamp_recency * self.time_bias
@@ -277,9 +264,10 @@ mod tests {
 
     #[test]
     fn test_basic_operations() {
+        let now = chrono::Utc::now().timestamp_millis();
         let lru: TimeBiasedLru<String, Vec<u8>> = TimeBiasedLru::new(1000, 0.0);
 
-        let evicted = lru.insert("key1".to_string(), vec![1, 2, 3], EntryMeta::new(100));
+        let evicted = lru.insert("key1".to_string(), vec![1, 2, 3], EntryMeta::new(100, now));
         assert!(evicted.is_empty());
         assert_eq!(lru.len(), 1);
         assert_eq!(lru.size_bytes(), 100);
@@ -290,13 +278,14 @@ mod tests {
 
     #[test]
     fn test_eviction() {
+        let now = chrono::Utc::now().timestamp_millis();
         let lru: TimeBiasedLru<String, Vec<u8>> = TimeBiasedLru::new(200, 0.0);
 
-        lru.insert("key1".to_string(), vec![1], EntryMeta::new(100));
-        lru.insert("key2".to_string(), vec![2], EntryMeta::new(100));
+        lru.insert("key1".to_string(), vec![1], EntryMeta::new(100, now));
+        lru.insert("key2".to_string(), vec![2], EntryMeta::new(100, now));
 
         // This should evict key1 (oldest accessed)
-        let evicted = lru.insert("key3".to_string(), vec![3], EntryMeta::new(100));
+        let evicted = lru.insert("key3".to_string(), vec![3], EntryMeta::new(100, now));
 
         assert_eq!(evicted.len(), 1);
         assert_eq!(evicted[0].0, "key1");
@@ -308,9 +297,10 @@ mod tests {
 
     #[test]
     fn test_remove() {
+        let now = chrono::Utc::now().timestamp_millis();
         let lru: TimeBiasedLru<String, Vec<u8>> = TimeBiasedLru::new(1000, 0.0);
 
-        lru.insert("key1".to_string(), vec![1, 2, 3], EntryMeta::new(100));
+        lru.insert("key1".to_string(), vec![1, 2, 3], EntryMeta::new(100, now));
         assert_eq!(lru.size_bytes(), 100);
 
         let removed = lru.remove(&"key1".to_string());
@@ -321,13 +311,14 @@ mod tests {
 
     #[test]
     fn test_update_existing() {
+        let now = chrono::Utc::now().timestamp_millis();
         let lru: TimeBiasedLru<String, Vec<u8>> = TimeBiasedLru::new(1000, 0.0);
 
-        lru.insert("key1".to_string(), vec![1], EntryMeta::new(100));
+        lru.insert("key1".to_string(), vec![1], EntryMeta::new(100, now));
         assert_eq!(lru.size_bytes(), 100);
 
         // Update with larger value
-        let evicted = lru.insert("key1".to_string(), vec![1, 2, 3], EntryMeta::new(200));
+        let evicted = lru.insert("key1".to_string(), vec![1, 2, 3], EntryMeta::new(200, now));
         assert_eq!(evicted.len(), 1); // Old value evicted
         assert_eq!(lru.size_bytes(), 200);
         assert_eq!(lru.len(), 1);
@@ -339,26 +330,18 @@ mod tests {
 
         // Insert old data first
         let old_ts = chrono::Utc::now().timestamp_millis() - 86_400_000; // 1 day ago
-        lru.insert(
-            "old".to_string(),
-            vec![1],
-            EntryMeta::with_timestamp(100, old_ts),
-        );
+        lru.insert("old".to_string(), vec![1], EntryMeta::new(100, old_ts));
 
         // Insert recent data
         let recent_ts = chrono::Utc::now().timestamp_millis();
         lru.insert(
             "recent".to_string(),
             vec![2],
-            EntryMeta::with_timestamp(100, recent_ts),
+            EntryMeta::new(100, recent_ts),
         );
 
         // This should evict "old" due to time bias
-        let evicted = lru.insert(
-            "new".to_string(),
-            vec![3],
-            EntryMeta::with_timestamp(100, recent_ts),
-        );
+        let evicted = lru.insert("new".to_string(), vec![3], EntryMeta::new(100, recent_ts));
 
         assert_eq!(evicted.len(), 1);
         assert_eq!(evicted[0].0, "old");
@@ -366,10 +349,11 @@ mod tests {
 
     #[test]
     fn test_clear() {
+        let now = chrono::Utc::now().timestamp_millis();
         let lru: TimeBiasedLru<String, Vec<u8>> = TimeBiasedLru::new(1000, 0.0);
 
-        lru.insert("key1".to_string(), vec![1], EntryMeta::new(100));
-        lru.insert("key2".to_string(), vec![2], EntryMeta::new(100));
+        lru.insert("key1".to_string(), vec![1], EntryMeta::new(100, now));
+        lru.insert("key2".to_string(), vec![2], EntryMeta::new(100, now));
 
         lru.clear();
 
@@ -382,6 +366,7 @@ mod tests {
         use std::sync::Arc;
         use std::thread;
 
+        let now = chrono::Utc::now().timestamp_millis();
         let lru = Arc::new(TimeBiasedLru::<u32, u32>::new(10000, 0.0));
 
         let handles: Vec<_> = (0..4)
@@ -390,7 +375,7 @@ mod tests {
                 thread::spawn(move || {
                     for i in 0..100 {
                         let key = t * 100 + i;
-                        lru.insert(key, key, EntryMeta::new(10));
+                        lru.insert(key, key, EntryMeta::new(10, now));
                         lru.get(&key);
                     }
                 })
@@ -403,5 +388,62 @@ mod tests {
 
         // Should have some entries (exact count depends on eviction)
         assert!(lru.len() > 0);
+    }
+
+    #[test]
+    fn test_peek_does_not_update_access_time() {
+        let now = chrono::Utc::now().timestamp_millis();
+        let lru: TimeBiasedLru<String, Vec<u8>> = TimeBiasedLru::new(200, 0.0);
+
+        lru.insert("key1".to_string(), vec![1], EntryMeta::new(100, now));
+        std::thread::sleep(std::time::Duration::from_millis(10));
+        lru.insert("key2".to_string(), vec![2], EntryMeta::new(100, now));
+
+        // Peek at key1 - should not update its access time
+        let val = lru.peek(&"key1".to_string());
+        assert_eq!(val, Some(vec![1]));
+
+        // key1 should still be evicted first since peek didn't update access time
+        let evicted = lru.insert("key3".to_string(), vec![3], EntryMeta::new(100, now));
+
+        assert_eq!(evicted.len(), 1);
+        assert_eq!(evicted[0].0, "key1");
+    }
+
+    #[test]
+    fn test_contains() {
+        let now = chrono::Utc::now().timestamp_millis();
+        let lru: TimeBiasedLru<String, Vec<u8>> = TimeBiasedLru::new(1000, 0.0);
+
+        assert!(!lru.contains(&"key1".to_string()));
+
+        lru.insert("key1".to_string(), vec![1], EntryMeta::new(100, now));
+
+        assert!(lru.contains(&"key1".to_string()));
+        assert!(!lru.contains(&"key2".to_string()));
+
+        lru.remove(&"key1".to_string());
+
+        assert!(!lru.contains(&"key1".to_string()));
+    }
+
+    #[test]
+    fn test_max_size_bytes() {
+        let now = chrono::Utc::now().timestamp_millis();
+        let lru: TimeBiasedLru<String, Vec<u8>> = TimeBiasedLru::new(500, 0.0);
+
+        assert_eq!(lru.max_size_bytes(), 500);
+
+        // Verify eviction respects max_size_bytes
+        lru.insert("key1".to_string(), vec![1], EntryMeta::new(200, now));
+        lru.insert("key2".to_string(), vec![2], EntryMeta::new(200, now));
+
+        assert!(lru.size_bytes() <= lru.max_size_bytes());
+
+        // Adding more should trigger eviction to stay under max
+        lru.insert("key3".to_string(), vec![3], EntryMeta::new(200, now));
+
+        assert!(lru.size_bytes() <= lru.max_size_bytes());
+        assert_eq!(lru.len(), 2); // Only 2 entries fit
     }
 }

@@ -92,7 +92,7 @@ impl BlockCache {
 
         let block = Arc::new(entries);
         let size_bytes = Self::estimate_block_size(&block);
-        let meta = EntryMeta::with_timestamp(size_bytes, min_timestamp);
+        let meta = EntryMeta::new(size_bytes, min_timestamp);
 
         let evicted = self.cache.insert(key, block, meta);
 
@@ -110,7 +110,7 @@ impl BlockCache {
         }
 
         let size_bytes = Self::estimate_block_size(&block);
-        let meta = EntryMeta::with_timestamp(size_bytes, min_timestamp);
+        let meta = EntryMeta::new(size_bytes, min_timestamp);
 
         let evicted = self.cache.insert(key, block, meta);
 
@@ -164,6 +164,29 @@ impl BlockCache {
     /// Get current size in bytes.
     pub fn size_bytes(&self) -> u64 {
         self.cache.size_bytes()
+    }
+
+    /// Get maximum size in bytes.
+    pub fn max_size_bytes(&self) -> u64 {
+        self.cache.max_size_bytes()
+    }
+
+    /// Check if a block is cached without fetching it.
+    pub fn contains(&self, key: &BlockKey) -> bool {
+        if !self.enabled {
+            return false;
+        }
+        self.cache.contains(key)
+    }
+
+    /// Peek at a cached block without updating its access time.
+    ///
+    /// Useful for diagnostics or when you don't want to affect eviction order.
+    pub fn peek(&self, key: &BlockKey) -> Option<CachedBlock> {
+        if !self.enabled {
+            return None;
+        }
+        self.cache.peek(key)
     }
 
     /// Clear all cached blocks.
