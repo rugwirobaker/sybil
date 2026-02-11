@@ -5,7 +5,7 @@
 
 use std::sync::Arc;
 
-use crate::segment::ProcessedEntry;
+use crate::segment::Block;
 
 use super::config::BlockCacheConfig;
 use super::lru::{EntryMeta, TimeBiasedLru};
@@ -42,9 +42,7 @@ impl BlockKey {
 }
 
 /// Cached block of decoded entries.
-pub type CachedBlock = Arc<Vec<ProcessedEntry>>;
-
-// TODO: We should defined A Block type in the segment module to avoid `Vec<ProcessedEntry>`
+pub type CachedBlock = Arc<Block>;
 
 /// Block cache for decoded log entries.
 ///
@@ -85,20 +83,20 @@ impl BlockCache {
     }
 
     /// Insert a block into the cache.
-    pub fn insert(&self, key: BlockKey, entries: Vec<ProcessedEntry>, min_timestamp: i64) {
+    pub fn insert(&self, key: BlockKey, block: Block, min_timestamp: i64) {
         if !self.enabled {
             return;
         }
 
-        let block = Arc::new(entries);
-        let size_bytes = Self::estimate_block_size(&block);
+        let size_bytes = block.size_bytes() as u64;
+        let block = Arc::new(block);
         let meta = EntryMeta::new(size_bytes, min_timestamp);
 
         let evicted = self.cache.insert(key, block, meta);
 
         self.metrics.record_insert(size_bytes);
         for (_, evicted_block) in evicted {
-            let evicted_size = Self::estimate_block_size(&evicted_block);
+            let evicted_size = evicted_block.size_bytes() as u64;
             self.metrics.record_eviction(evicted_size);
         }
     }
@@ -109,14 +107,14 @@ impl BlockCache {
             return;
         }
 
-        let size_bytes = Self::estimate_block_size(&block);
+        let size_bytes = block.size_bytes() as u64;
         let meta = EntryMeta::new(size_bytes, min_timestamp);
 
         let evicted = self.cache.insert(key, block, meta);
 
         self.metrics.record_insert(size_bytes);
         for (_, evicted_block) in evicted {
-            let evicted_size = Self::estimate_block_size(&evicted_block);
+            let evicted_size = evicted_block.size_bytes() as u64;
             self.metrics.record_eviction(evicted_size);
         }
     }
@@ -134,21 +132,10 @@ impl BlockCache {
 
         for key in keys {
             if let Some(block) = self.cache.remove(&key) {
-                let size = Self::estimate_block_size(&block);
+                let size = block.size_bytes() as u64;
                 self.metrics.record_eviction(size);
             }
         }
-    }
-
-    /// Estimate the memory size of a block in bytes.
-    fn estimate_block_size(block: &[ProcessedEntry]) -> u64 {
-        block
-            .iter()
-            .map(|e| {
-                // Base size + dict_ids vec + payload vec
-                32 + (e.dict_ids.len() * 4) + e.payload.len()
-            })
-            .sum::<usize>() as u64
     }
 
     /// Get current entry count.
@@ -198,7 +185,7 @@ impl BlockCache {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::segment::PresenceBitmap;
+    use crate::segment::{PresenceBitmap, ProcessedEntry};
 
     fn make_entry(ts: i64, payload: &[u8]) -> ProcessedEntry {
         ProcessedEntry {
@@ -207,6 +194,10 @@ mod tests {
             dict_ids: vec![],
             payload: payload.to_vec(),
         }
+    }
+
+    fn make_block(entries: Vec<ProcessedEntry>) -> Block {
+        Block::from_entries(entries)
     }
 
     fn test_config() -> BlockCacheConfig {
@@ -223,9 +214,9 @@ mod tests {
         let cache = BlockCache::new(&test_config(), Arc::clone(&metrics));
 
         let key = BlockKey::l0("segment-001");
-        let entries = vec![make_entry(1000, b"test payload")];
+        let block = make_block(vec![make_entry(1000, b"test payload")]);
 
-        cache.insert(key.clone(), entries, 1000);
+        cache.insert(key.clone(), block, 1000);
 
         let retrieved = cache.get(&key);
         assert!(retrieved.is_some());
@@ -253,17 +244,17 @@ mod tests {
         // Insert multiple blocks for same segment
         cache.insert(
             BlockKey::block("segment-001", 0),
-            vec![make_entry(1000, b"block 0")],
+            make_block(vec![make_entry(1000, b"block 0")]),
             1000,
         );
         cache.insert(
             BlockKey::block("segment-001", 1),
-            vec![make_entry(2000, b"block 1")],
+            make_block(vec![make_entry(2000, b"block 1")]),
             2000,
         );
         cache.insert(
             BlockKey::l0("segment-002"),
-            vec![make_entry(3000, b"other")],
+            make_block(vec![make_entry(3000, b"other")]),
             3000,
         );
 
@@ -286,7 +277,11 @@ mod tests {
         let cache = BlockCache::new(&config, Arc::clone(&metrics));
 
         let key = BlockKey::l0("segment-001");
-        cache.insert(key.clone(), vec![make_entry(1000, b"test")], 1000);
+        cache.insert(
+            key.clone(),
+            make_block(vec![make_entry(1000, b"test")]),
+            1000,
+        );
 
         // Should not be cached
         assert!(cache.get(&key).is_none());

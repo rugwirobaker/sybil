@@ -4,7 +4,7 @@ use std::io::{self, Cursor};
 
 use super::bloom::BloomFilter;
 use super::dictionary::Dictionary;
-use super::entry::ProcessedEntry;
+use super::entry::{Block, ProcessedEntry};
 use super::footer::{SegmentFooter, FOOTER_SIZE};
 
 /// Parsed segment ready for querying.
@@ -12,7 +12,7 @@ pub struct Reader {
     pub footer: SegmentFooter,
     pub dictionary: Dictionary,
     pub blooms: Vec<(u8, BloomFilter)>,
-    entries: Vec<ProcessedEntry>,
+    entries: Block,
 }
 
 impl Reader {
@@ -65,7 +65,7 @@ impl Reader {
         let compressed = &data[..footer.entries_size as usize];
         let decompressed = zstd::decode_all(Cursor::new(compressed))?;
 
-        let mut entries = Vec::with_capacity(footer.log_count as usize);
+        let mut entries = Block::new();
         let mut cursor = Cursor::new(&decompressed);
         for _ in 0..footer.log_count {
             let entry = ProcessedEntry::read_from(&mut cursor, footer.min_timestamp)?;

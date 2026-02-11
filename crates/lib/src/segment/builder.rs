@@ -43,11 +43,11 @@ use std::io::{self, Cursor, Write};
 
 use super::bloom::BloomFilter;
 use super::dictionary::Dictionary;
-use super::entry::{PresenceBitmap, ProcessedEntry, AUTO_INDEX_FIELDS};
+use super::entry::{Block, PresenceBitmap, ProcessedEntry, AUTO_INDEX_FIELDS};
 use super::footer::{compute_checksum, FOOTER_SIZE};
 
 pub struct Builder {
-    entries: Vec<ProcessedEntry>,
+    entries: Block,
     dictionary: Dictionary,
     blooms: Vec<BloomFilter>,
     bloom_values: Vec<std::collections::HashSet<String>>,
@@ -57,7 +57,7 @@ impl Builder {
     pub fn new() -> Self {
         let num_fields = AUTO_INDEX_FIELDS.len();
         Self {
-            entries: Vec::new(),
+            entries: Block::new(),
             dictionary: Dictionary::new(),
             blooms: (0..num_fields).map(|_| BloomFilter::new(1000)).collect(),
             bloom_values: (0..num_fields)

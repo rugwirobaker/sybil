@@ -171,7 +171,7 @@ mod tests {
         let (manager, _tmp) = test_manager().await;
 
         // Insert some data
-        use crate::segment::{BloomFilter, PresenceBitmap, ProcessedEntry};
+        use crate::segment::{Block, BloomFilter, PresenceBitmap, ProcessedEntry};
 
         let entry = ProcessedEntry {
             timestamp: 1000,
@@ -180,9 +180,11 @@ mod tests {
             payload: b"test".to_vec(),
         };
 
-        manager
-            .block
-            .insert(BlockKey::l0("seg-001"), vec![entry], 1000);
+        manager.block.insert(
+            BlockKey::l0("seg-001"),
+            Block::from_entries(vec![entry]),
+            1000,
+        );
 
         let mut bloom = BloomFilter::new(10);
         bloom.insert(b"test");

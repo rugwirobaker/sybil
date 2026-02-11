@@ -158,6 +158,71 @@ pub fn field_index(name: &str) -> Option<usize> {
     AUTO_INDEX_FIELDS.iter().position(|&f| f == name)
 }
 
+/// A block of processed log entries.
+///
+/// Blocks are the unit of decoded data in the cache and query path.
+/// L0 segments have a single block; L1/L2 segments have multiple 64KB blocks.
+#[derive(Debug, Clone, Default)]
+pub struct Block {
+    entries: Vec<ProcessedEntry>,
+}
+
+impl Block {
+    /// Create a new empty block.
+    pub fn new() -> Self {
+        Self {
+            entries: Vec::new(),
+        }
+    }
+
+    /// Create a block from a vector of entries.
+    pub fn from_entries(entries: Vec<ProcessedEntry>) -> Self {
+        Self { entries }
+    }
+
+    /// Number of entries in the block.
+    pub fn len(&self) -> usize {
+        self.entries.len()
+    }
+
+    /// Check if the block is empty.
+    pub fn is_empty(&self) -> bool {
+        self.entries.is_empty()
+    }
+
+    /// Iterate over entries.
+    pub fn iter(&self) -> impl Iterator<Item = &ProcessedEntry> {
+        self.entries.iter()
+    }
+
+    /// Get the underlying entries (consumes the block).
+    pub fn into_entries(self) -> Vec<ProcessedEntry> {
+        self.entries
+    }
+
+    /// Add an entry to the block.
+    pub fn push(&mut self, entry: ProcessedEntry) {
+        self.entries.push(entry);
+    }
+
+    /// Estimate memory size in bytes.
+    pub fn size_bytes(&self) -> usize {
+        self.entries
+            .iter()
+            .map(|e| 32 + (e.dict_ids.len() * 4) + e.payload.len())
+            .sum()
+    }
+}
+
+impl<'a> IntoIterator for &'a Block {
+    type Item = &'a ProcessedEntry;
+    type IntoIter = std::slice::Iter<'a, ProcessedEntry>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.entries.iter()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -19,7 +19,7 @@ mod reader;
 pub use bloom::BloomFilter;
 pub use builder::Builder;
 pub use dictionary::Dictionary;
-pub use entry::{field_index, LogEntry, PresenceBitmap, ProcessedEntry, AUTO_INDEX_FIELDS};
+pub use entry::{field_index, Block, LogEntry, PresenceBitmap, ProcessedEntry, AUTO_INDEX_FIELDS};
 pub use footer::{SegmentFooter, FOOTER_SIZE, MAGIC};
 pub use reader::Reader;
 
