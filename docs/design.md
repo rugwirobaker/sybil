@@ -104,14 +104,14 @@ The system consists of three stateless, independently scalable components that u
              ▼             │           ▼
         ┌─────────────────────────────────┐
         │         Tigris (S3)             │
-        │  ┌───────────┐  ┌────────────┐  │
-        │  │Log Segments│  │  Indexes   │  │
-        │  └───────────┘  └────────────┘  │
+        │  ┌──────────-─┐  ┌────────────┐ │
+        │  │Log Segments│  │  Indexes   │ │
+        │  └──────────-─┘  └────────────┘ │
         └─────────────────────────────────┘
                            ▲
                            │
                     ┌──────┴──────┐
-                    │  Steward  │
+                    │  Steward    │
                     └─────────────┘
 ```
 
