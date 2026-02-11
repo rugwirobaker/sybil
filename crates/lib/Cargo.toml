@@ -12,6 +12,7 @@ test-harness = []
 
 [dependencies]
 serde = { workspace = true }
+serde_json = { workspace = true }
 toml = { workspace = true }
 thiserror = { workspace = true }
 async-trait = { workspace = true }
@@ -19,6 +20,14 @@ bytes = { workspace = true }
 object_store = { workspace = true }
 url = { workspace = true }
 futures = { workspace = true }
+
+# IDs and timestamps
+ulid = { workspace = true }
+chrono = { workspace = true }
+
+# Compression and checksums
+zstd = { workspace = true }
+crc32fast = { workspace = true }
 
 [dev-dependencies]
 tokio = { workspace = true }

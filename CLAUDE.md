@@ -27,6 +27,20 @@ Here are some tools at your disposal. They should make some specif worflows easi
 
 * `html2markdown`: HTML to Markdown. Some websites might be packed with too much useless html and javescript. Pipping the html from curl to `html2markdown` gets us a token friendly version we can add to our context.
 
+## Guidelines
+
+### Before making changes
+
+1. Check the design document (docs/design.md) for architectural context
+2. Review existing tests in the affected crate to understand expected behavior
+3. Check for existing TODOs: rg "TODO|FIXME|HACK" crates/
+
+## After making changes
+
+1. Hid our lord and savior clippy: Run cargo clippy and fix any complaints it might have.
+2. Format the code: with cargo fmt
+3. Run tests: make sure tests on affected code still pass and expand with more tests if necessary.
+
 ## Inspirations
 
 - [turbopuffer](https://turbopuffer.com/blog/turbopuffer) - S3-native vector database, simple architecture

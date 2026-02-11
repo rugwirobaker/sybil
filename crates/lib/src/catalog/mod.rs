@@ -1,0 +1,320 @@
+//! Catalog: Global namespace registry.
+//!
+//! The catalog tracks namespace name ↔ ID mappings using an append-only log
+//! pattern for S3-native atomicity:
+//!
+//! ```text
+//! /metadata/
+//!   ├── head.json                    # Current state pointer
+//!   ├── snapshots/
+//!   │   └── {timestamp}.json         # Compacted namespace list
+//!   └── log/
+//!       └── {ulid}.json              # Individual operations
+//! ```
+
+use chrono::{DateTime, Utc};
+use serde::{Deserialize, Serialize};
+
+/// The catalog head pointer.
+///
+/// Points to the current snapshot and lists log entries to apply on top.
+/// This is the only mutable file in the catalog.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct CatalogHead {
+    pub version: u32,
+    /// Path to the current snapshot (relative to metadata/).
+    pub snapshot: String,
+    /// Log entry IDs to apply on top of the snapshot.
+    pub log_tail: Vec<String>,
+}
+
+impl CatalogHead {
+    pub fn new(snapshot: String) -> Self {
+        Self {
+            version: 1,
+            snapshot,
+            log_tail: Vec::new(),
+        }
+    }
+
+    pub fn to_bytes(&self) -> Result<Vec<u8>, serde_json::Error> {
+        serde_json::to_vec_pretty(self)
+    }
+
+    pub fn from_bytes(data: &[u8]) -> Result<Self, serde_json::Error> {
+        serde_json::from_slice(data)
+    }
+}
+
+/// A catalog snapshot containing the complete namespace list.
+/// Snapshots are immutable and can be cached indefinitely.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct CatalogSnapshot {
+    pub created_at: DateTime<Utc>,
+    pub namespaces: Vec<NamespaceInfo>,
+}
+
+impl CatalogSnapshot {
+    pub fn empty() -> Self {
+        Self {
+            created_at: Utc::now(),
+            namespaces: Vec::new(),
+        }
+    }
+
+    pub fn new(namespaces: Vec<NamespaceInfo>) -> Self {
+        Self {
+            created_at: Utc::now(),
+            namespaces,
+        }
+    }
+
+    pub fn to_bytes(&self) -> Result<Vec<u8>, serde_json::Error> {
+        serde_json::to_vec_pretty(self)
+    }
+
+    pub fn from_bytes(data: &[u8]) -> Result<Self, serde_json::Error> {
+        serde_json::from_slice(data)
+    }
+}
+
+/// Information about a namespace.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct NamespaceInfo {
+    /// Unique namespace ID (e.g., "ns_01JQXYZ123ABCDEFGHJKMNPQRS").
+    pub id: String,
+    /// Human-readable name used in SQL FROM clause.
+    pub name: String,
+    #[serde(default = "default_retention_days")]
+    pub retention_days: u32,
+    pub created_at: DateTime<Utc>,
+}
+
+fn default_retention_days() -> u32 {
+    7
+}
+
+impl NamespaceInfo {
+    pub fn new(name: impl Into<String>) -> Self {
+        Self {
+            id: generate_namespace_id(),
+            name: name.into(),
+            retention_days: 7,
+            created_at: Utc::now(),
+        }
+    }
+
+    pub fn with_retention(name: impl Into<String>, retention_days: u32) -> Self {
+        Self {
+            id: generate_namespace_id(),
+            name: name.into(),
+            retention_days,
+            created_at: Utc::now(),
+        }
+    }
+}
+
+pub fn generate_namespace_id() -> String {
+    format!("ns_{}", ulid::Ulid::new())
+}
+
+/// A catalog log entry representing a single mutation.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct CatalogLogEntry {
+    pub id: String,
+    pub timestamp: DateTime<Utc>,
+    pub action: CatalogAction,
+}
+
+impl CatalogLogEntry {
+    pub fn add(namespace: NamespaceInfo) -> Self {
+        Self {
+            id: ulid::Ulid::new().to_string(),
+            timestamp: Utc::now(),
+            action: CatalogAction::Add { namespace },
+        }
+    }
+
+    pub fn remove(namespace_id: impl Into<String>) -> Self {
+        Self {
+            id: ulid::Ulid::new().to_string(),
+            timestamp: Utc::now(),
+            action: CatalogAction::Remove {
+                namespace_id: namespace_id.into(),
+            },
+        }
+    }
+
+    pub fn to_bytes(&self) -> Result<Vec<u8>, serde_json::Error> {
+        serde_json::to_vec_pretty(self)
+    }
+
+    pub fn from_bytes(data: &[u8]) -> Result<Self, serde_json::Error> {
+        serde_json::from_slice(data)
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum CatalogAction {
+    Add { namespace: NamespaceInfo },
+    Remove { namespace_id: String },
+}
+
+/// Computed catalog state after applying log entries to a snapshot.
+#[derive(Debug, Clone, Default)]
+pub struct CatalogState {
+    namespaces_by_name: std::collections::HashMap<String, NamespaceInfo>,
+    namespaces_by_id: std::collections::HashMap<String, NamespaceInfo>,
+}
+
+impl CatalogState {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn from_snapshot_and_log(
+        snapshot: &CatalogSnapshot,
+        log_entries: &[CatalogLogEntry],
+    ) -> Self {
+        let mut state = Self::new();
+        for ns in &snapshot.namespaces {
+            state.insert(ns.clone());
+        }
+        for entry in log_entries {
+            state.apply(&entry.action);
+        }
+        state
+    }
+
+    pub fn apply(&mut self, action: &CatalogAction) {
+        match action {
+            CatalogAction::Add { namespace } => self.insert(namespace.clone()),
+            CatalogAction::Remove { namespace_id } => self.remove(namespace_id),
+        }
+    }
+
+    fn insert(&mut self, namespace: NamespaceInfo) {
+        self.namespaces_by_name
+            .insert(namespace.name.clone(), namespace.clone());
+        self.namespaces_by_id
+            .insert(namespace.id.clone(), namespace);
+    }
+
+    fn remove(&mut self, namespace_id: &str) {
+        if let Some(ns) = self.namespaces_by_id.remove(namespace_id) {
+            self.namespaces_by_name.remove(&ns.name);
+        }
+    }
+
+    pub fn get_by_name(&self, name: &str) -> Option<&NamespaceInfo> {
+        self.namespaces_by_name.get(name)
+    }
+
+    pub fn get_by_id(&self, id: &str) -> Option<&NamespaceInfo> {
+        self.namespaces_by_id.get(id)
+    }
+
+    pub fn list(&self) -> impl Iterator<Item = &NamespaceInfo> {
+        self.namespaces_by_name.values()
+    }
+
+    pub fn len(&self) -> usize {
+        self.namespaces_by_name.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.namespaces_by_name.is_empty()
+    }
+
+    pub fn to_snapshot(&self) -> CatalogSnapshot {
+        CatalogSnapshot::new(self.namespaces_by_name.values().cloned().collect())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_namespace_info_creation() {
+        let ns = NamespaceInfo::new("api_gateway");
+        assert!(ns.id.starts_with("ns_"));
+        assert_eq!(ns.name, "api_gateway");
+        assert_eq!(ns.retention_days, 7);
+    }
+
+    #[test]
+    fn test_catalog_head_serialization() {
+        let head = CatalogHead::new("snapshots/2025-01-15T00:00:00Z.json".to_string());
+        let bytes = head.to_bytes().unwrap();
+        let parsed = CatalogHead::from_bytes(&bytes).unwrap();
+        assert_eq!(head, parsed);
+    }
+
+    #[test]
+    fn test_catalog_snapshot_serialization() {
+        let ns = NamespaceInfo::new("test_namespace");
+        let snapshot = CatalogSnapshot::new(vec![ns.clone()]);
+        let bytes = snapshot.to_bytes().unwrap();
+        let parsed = CatalogSnapshot::from_bytes(&bytes).unwrap();
+        assert_eq!(snapshot.namespaces.len(), parsed.namespaces.len());
+        assert_eq!(snapshot.namespaces[0].name, parsed.namespaces[0].name);
+    }
+
+    #[test]
+    fn test_catalog_log_entry_add() {
+        let ns = NamespaceInfo::new("my_app");
+        let entry = CatalogLogEntry::add(ns.clone());
+        let bytes = entry.to_bytes().unwrap();
+        let parsed = CatalogLogEntry::from_bytes(&bytes).unwrap();
+
+        match parsed.action {
+            CatalogAction::Add { namespace } => assert_eq!(namespace.name, "my_app"),
+            _ => panic!("Expected Add action"),
+        }
+    }
+
+    #[test]
+    fn test_catalog_log_entry_remove() {
+        let entry = CatalogLogEntry::remove("ns_01JQXYZ123");
+        let bytes = entry.to_bytes().unwrap();
+        let parsed = CatalogLogEntry::from_bytes(&bytes).unwrap();
+
+        match parsed.action {
+            CatalogAction::Remove { namespace_id } => assert_eq!(namespace_id, "ns_01JQXYZ123"),
+            _ => panic!("Expected Remove action"),
+        }
+    }
+
+    #[test]
+    fn test_catalog_state_from_snapshot_and_log() {
+        let ns1 = NamespaceInfo::new("service_a");
+        let snapshot = CatalogSnapshot::new(vec![ns1.clone()]);
+
+        let ns2 = NamespaceInfo::new("service_b");
+        let log = vec![
+            CatalogLogEntry::add(ns2.clone()),
+            CatalogLogEntry::remove(ns1.id.clone()),
+        ];
+
+        let state = CatalogState::from_snapshot_and_log(&snapshot, &log);
+
+        assert_eq!(state.len(), 1);
+        assert!(state.get_by_name("service_a").is_none());
+        assert!(state.get_by_name("service_b").is_some());
+    }
+
+    #[test]
+    fn test_catalog_state_to_snapshot() {
+        let mut state = CatalogState::new();
+        let ns = NamespaceInfo::new("my_service");
+        state.apply(&CatalogAction::Add {
+            namespace: ns.clone(),
+        });
+
+        let snapshot = state.to_snapshot();
+        assert_eq!(snapshot.namespaces.len(), 1);
+        assert_eq!(snapshot.namespaces[0].name, "my_service");
+    }
+}
