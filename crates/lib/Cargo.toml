@@ -29,5 +29,9 @@ chrono = { workspace = true }
 zstd = { workspace = true }
 crc32fast = { workspace = true }
 
-[dev-dependencies]
+# Concurrency
+parking_lot = { workspace = true }
 tokio = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }

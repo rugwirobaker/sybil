@@ -36,6 +36,9 @@ tokio = { version = "1.0", features = ["full"] }
 async-trait = "0.1"
 bytes = "1.0"
 
+# Concurrency
+parking_lot = "0.12"
+
 # Storage
 object_store = { version = "0.11", features = ["aws"] }
 url = "2.5"
@@ -48,6 +51,9 @@ anyhow = "1.0"
 # Logging/tracing
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+
+# Testing
+tempfile = "3.10"
 
 # Internal crates
 lib = { path = "crates/lib" }

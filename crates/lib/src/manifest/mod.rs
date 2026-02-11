@@ -16,13 +16,13 @@ use serde::{Deserialize, Serialize};
 
 /// The manifest head pointer.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct ManifestHead {
+pub struct Head {
     pub version: u32,
     pub snapshot: String,
     pub log_tail: Vec<String>,
 }
 
-impl ManifestHead {
+impl Head {
     pub fn new(snapshot: String) -> Self {
         Self {
             version: 1,
@@ -42,12 +42,12 @@ impl ManifestHead {
 
 /// A manifest snapshot containing the segment list.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct ManifestSnapshot {
+pub struct Snapshot {
     pub created_at: DateTime<Utc>,
     pub segments: Vec<SegmentInfo>,
 }
 
-impl ManifestSnapshot {
+impl Snapshot {
     pub fn empty() -> Self {
         Self {
             created_at: Utc::now(),
@@ -159,14 +159,14 @@ impl SegmentInfo {
 
 /// A manifest log entry representing segment mutations.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct ManifestLogEntry {
+pub struct LongEntry {
     pub id: String,
     pub timestamp: DateTime<Utc>,
-    pub actions: Vec<ManifestAction>,
+    pub actions: Vec<Action>,
 }
 
-impl ManifestLogEntry {
-    pub fn new(actions: Vec<ManifestAction>) -> Self {
+impl LongEntry {
+    pub fn new(actions: Vec<Action>) -> Self {
         Self {
             id: ulid::Ulid::new().to_string(),
             timestamp: Utc::now(),
@@ -176,16 +176,16 @@ impl ManifestLogEntry {
 
     /// Create a log entry that adds a single segment.
     pub fn add_segment(segment: SegmentInfo) -> Self {
-        Self::new(vec![ManifestAction::Add { segment }])
+        Self::new(vec![Action::Add { segment }])
     }
 
     /// Create a log entry for compaction: add new segment, supersede old ones.
     pub fn compact(new_segment: SegmentInfo, superseded_keys: Vec<String>) -> Self {
-        let mut actions = vec![ManifestAction::Add {
+        let mut actions = vec![Action::Add {
             segment: new_segment,
         }];
         for key in superseded_keys {
-            actions.push(ManifestAction::Supersede { key });
+            actions.push(Action::Supersede { key });
         }
         Self::new(actions)
     }
@@ -201,7 +201,7 @@ impl ManifestLogEntry {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "type", rename_all = "snake_case")]
-pub enum ManifestAction {
+pub enum Action {
     /// Add a new segment.
     Add { segment: SegmentInfo },
     /// Mark a segment as superseded.
@@ -212,19 +212,16 @@ pub enum ManifestAction {
 
 /// Computed manifest state after applying log entries to a snapshot.
 #[derive(Debug, Clone, Default)]
-pub struct ManifestState {
+pub struct State {
     segments: std::collections::HashMap<String, SegmentInfo>,
 }
 
-impl ManifestState {
+impl State {
     pub fn new() -> Self {
         Self::default()
     }
 
-    pub fn from_snapshot_and_log(
-        snapshot: &ManifestSnapshot,
-        log_entries: &[ManifestLogEntry],
-    ) -> Self {
+    pub fn from_snapshot_and_log(snapshot: &Snapshot, log_entries: &[LongEntry]) -> Self {
         let mut state = Self::new();
         for seg in &snapshot.segments {
             state.segments.insert(seg.key.clone(), seg.clone());
@@ -237,17 +234,17 @@ impl ManifestState {
         state
     }
 
-    pub fn apply(&mut self, action: &ManifestAction) {
+    pub fn apply(&mut self, action: &Action) {
         match action {
-            ManifestAction::Add { segment } => {
+            Action::Add { segment } => {
                 self.segments.insert(segment.key.clone(), segment.clone());
             }
-            ManifestAction::Supersede { key } => {
+            Action::Supersede { key } => {
                 if let Some(seg) = self.segments.get_mut(key) {
                     seg.supersede();
                 }
             }
-            ManifestAction::Remove { key } => {
+            Action::Remove { key } => {
                 self.segments.remove(key);
             }
         }
@@ -290,8 +287,8 @@ impl ManifestState {
         self.segments.is_empty()
     }
 
-    pub fn to_snapshot(&self) -> ManifestSnapshot {
-        ManifestSnapshot::new(self.segments.values().cloned().collect())
+    pub fn to_snapshot(&self) -> Snapshot {
+        Snapshot::new(self.segments.values().cloned().collect())
     }
 }
 
@@ -317,39 +314,33 @@ mod tests {
 
     #[test]
     fn test_manifest_head_serialization() {
-        let head = ManifestHead::new("snapshot-2025-01-15T00:00:00Z.json".to_string());
+        let head = Head::new("snapshot-2025-01-15T00:00:00Z.json".to_string());
         let bytes = head.to_bytes().unwrap();
-        let parsed = ManifestHead::from_bytes(&bytes).unwrap();
+        let parsed = Head::from_bytes(&bytes).unwrap();
         assert_eq!(head, parsed);
     }
 
     #[test]
     fn test_manifest_snapshot_serialization() {
         let seg = make_segment("test.seg", SegmentLevel::L0, 100, 200);
-        let snapshot = ManifestSnapshot::new(vec![seg]);
+        let snapshot = Snapshot::new(vec![seg]);
         let bytes = snapshot.to_bytes().unwrap();
-        let parsed = ManifestSnapshot::from_bytes(&bytes).unwrap();
+        let parsed = Snapshot::from_bytes(&bytes).unwrap();
         assert_eq!(snapshot.segments.len(), parsed.segments.len());
     }
 
     #[test]
     fn test_manifest_log_entry_compact() {
         let new_seg = make_segment("L1/2025-01-15/14.seg", SegmentLevel::L1, 100, 200);
-        let entry = ManifestLogEntry::compact(
+        let entry = LongEntry::compact(
             new_seg,
             vec!["L0/14/001.seg".to_string(), "L0/14/002.seg".to_string()],
         );
 
         assert_eq!(entry.actions.len(), 3);
-        assert!(matches!(&entry.actions[0], ManifestAction::Add { .. }));
-        assert!(matches!(
-            &entry.actions[1],
-            ManifestAction::Supersede { .. }
-        ));
-        assert!(matches!(
-            &entry.actions[2],
-            ManifestAction::Supersede { .. }
-        ));
+        assert!(matches!(&entry.actions[0], Action::Add { .. }));
+        assert!(matches!(&entry.actions[1], Action::Supersede { .. }));
+        assert!(matches!(&entry.actions[2], Action::Supersede { .. }));
     }
 
     #[test]
@@ -357,16 +348,16 @@ mod tests {
         // Start with two L0 segments
         let seg1 = make_segment("L0/14/001.seg", SegmentLevel::L0, 100, 150);
         let seg2 = make_segment("L0/14/002.seg", SegmentLevel::L0, 151, 200);
-        let snapshot = ManifestSnapshot::new(vec![seg1.clone(), seg2.clone()]);
+        let snapshot = Snapshot::new(vec![seg1.clone(), seg2.clone()]);
 
         // Compact into L1
         let l1_seg = make_segment("L1/2025-01-15/14.seg", SegmentLevel::L1, 100, 200);
-        let log = vec![ManifestLogEntry::compact(
+        let log = vec![LongEntry::compact(
             l1_seg.clone(),
             vec![seg1.key.clone(), seg2.key.clone()],
         )];
 
-        let state = ManifestState::from_snapshot_and_log(&snapshot, &log);
+        let state = State::from_snapshot_and_log(&snapshot, &log);
 
         // Should have 3 segments total, but only 1 active
         assert_eq!(state.len(), 3);
@@ -383,8 +374,8 @@ mod tests {
         let seg1 = make_segment("seg1", SegmentLevel::L0, 0, 100);
         let seg2 = make_segment("seg2", SegmentLevel::L0, 101, 200);
         let seg3 = make_segment("seg3", SegmentLevel::L0, 201, 300);
-        let snapshot = ManifestSnapshot::new(vec![seg1, seg2, seg3]);
-        let state = ManifestState::from_snapshot_and_log(&snapshot, &[]);
+        let snapshot = Snapshot::new(vec![seg1, seg2, seg3]);
+        let state = State::from_snapshot_and_log(&snapshot, &[]);
 
         let in_range = state.segments_in_range(50, 150);
         assert_eq!(in_range.len(), 2); // seg1 and seg2

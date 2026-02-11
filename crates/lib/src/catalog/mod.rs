@@ -20,7 +20,7 @@ use serde::{Deserialize, Serialize};
 /// Points to the current snapshot and lists log entries to apply on top.
 /// This is the only mutable file in the catalog.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct CatalogHead {
+pub struct Head {
     pub version: u32,
     /// Path to the current snapshot (relative to metadata/).
     pub snapshot: String,
@@ -28,7 +28,7 @@ pub struct CatalogHead {
     pub log_tail: Vec<String>,
 }
 
-impl CatalogHead {
+impl Head {
     pub fn new(snapshot: String) -> Self {
         Self {
             version: 1,
@@ -49,12 +49,12 @@ impl CatalogHead {
 /// A catalog snapshot containing the complete namespace list.
 /// Snapshots are immutable and can be cached indefinitely.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct CatalogSnapshot {
+pub struct Snapshot {
     pub created_at: DateTime<Utc>,
     pub namespaces: Vec<NamespaceInfo>,
 }
 
-impl CatalogSnapshot {
+impl Snapshot {
     pub fn empty() -> Self {
         Self {
             created_at: Utc::now(),
@@ -120,18 +120,18 @@ pub fn generate_namespace_id() -> String {
 
 /// A catalog log entry representing a single mutation.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct CatalogLogEntry {
+pub struct LongEntry {
     pub id: String,
     pub timestamp: DateTime<Utc>,
-    pub action: CatalogAction,
+    pub action: Action,
 }
 
-impl CatalogLogEntry {
+impl LongEntry {
     pub fn add(namespace: NamespaceInfo) -> Self {
         Self {
             id: ulid::Ulid::new().to_string(),
             timestamp: Utc::now(),
-            action: CatalogAction::Add { namespace },
+            action: Action::Add { namespace },
         }
     }
 
@@ -139,7 +139,7 @@ impl CatalogLogEntry {
         Self {
             id: ulid::Ulid::new().to_string(),
             timestamp: Utc::now(),
-            action: CatalogAction::Remove {
+            action: Action::Remove {
                 namespace_id: namespace_id.into(),
             },
         }
@@ -156,27 +156,24 @@ impl CatalogLogEntry {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "type", rename_all = "snake_case")]
-pub enum CatalogAction {
+pub enum Action {
     Add { namespace: NamespaceInfo },
     Remove { namespace_id: String },
 }
 
 /// Computed catalog state after applying log entries to a snapshot.
 #[derive(Debug, Clone, Default)]
-pub struct CatalogState {
+pub struct State {
     namespaces_by_name: std::collections::HashMap<String, NamespaceInfo>,
     namespaces_by_id: std::collections::HashMap<String, NamespaceInfo>,
 }
 
-impl CatalogState {
+impl State {
     pub fn new() -> Self {
         Self::default()
     }
 
-    pub fn from_snapshot_and_log(
-        snapshot: &CatalogSnapshot,
-        log_entries: &[CatalogLogEntry],
-    ) -> Self {
+    pub fn from_snapshot_and_log(snapshot: &Snapshot, log_entries: &[LongEntry]) -> Self {
         let mut state = Self::new();
         for ns in &snapshot.namespaces {
             state.insert(ns.clone());
@@ -187,10 +184,10 @@ impl CatalogState {
         state
     }
 
-    pub fn apply(&mut self, action: &CatalogAction) {
+    pub fn apply(&mut self, action: &Action) {
         match action {
-            CatalogAction::Add { namespace } => self.insert(namespace.clone()),
-            CatalogAction::Remove { namespace_id } => self.remove(namespace_id),
+            Action::Add { namespace } => self.insert(namespace.clone()),
+            Action::Remove { namespace_id } => self.remove(namespace_id),
         }
     }
 
@@ -227,8 +224,8 @@ impl CatalogState {
         self.namespaces_by_name.is_empty()
     }
 
-    pub fn to_snapshot(&self) -> CatalogSnapshot {
-        CatalogSnapshot::new(self.namespaces_by_name.values().cloned().collect())
+    pub fn to_snapshot(&self) -> Snapshot {
+        Snapshot::new(self.namespaces_by_name.values().cloned().collect())
     }
 }
 
@@ -246,18 +243,18 @@ mod tests {
 
     #[test]
     fn test_catalog_head_serialization() {
-        let head = CatalogHead::new("snapshots/2025-01-15T00:00:00Z.json".to_string());
+        let head = Head::new("snapshots/2025-01-15T00:00:00Z.json".to_string());
         let bytes = head.to_bytes().unwrap();
-        let parsed = CatalogHead::from_bytes(&bytes).unwrap();
+        let parsed = Head::from_bytes(&bytes).unwrap();
         assert_eq!(head, parsed);
     }
 
     #[test]
     fn test_catalog_snapshot_serialization() {
         let ns = NamespaceInfo::new("test_namespace");
-        let snapshot = CatalogSnapshot::new(vec![ns.clone()]);
+        let snapshot = Snapshot::new(vec![ns.clone()]);
         let bytes = snapshot.to_bytes().unwrap();
-        let parsed = CatalogSnapshot::from_bytes(&bytes).unwrap();
+        let parsed = Snapshot::from_bytes(&bytes).unwrap();
         assert_eq!(snapshot.namespaces.len(), parsed.namespaces.len());
         assert_eq!(snapshot.namespaces[0].name, parsed.namespaces[0].name);
     }
@@ -265,24 +262,24 @@ mod tests {
     #[test]
     fn test_catalog_log_entry_add() {
         let ns = NamespaceInfo::new("my_app");
-        let entry = CatalogLogEntry::add(ns.clone());
+        let entry = LongEntry::add(ns.clone());
         let bytes = entry.to_bytes().unwrap();
-        let parsed = CatalogLogEntry::from_bytes(&bytes).unwrap();
+        let parsed = LongEntry::from_bytes(&bytes).unwrap();
 
         match parsed.action {
-            CatalogAction::Add { namespace } => assert_eq!(namespace.name, "my_app"),
+            Action::Add { namespace } => assert_eq!(namespace.name, "my_app"),
             _ => panic!("Expected Add action"),
         }
     }
 
     #[test]
     fn test_catalog_log_entry_remove() {
-        let entry = CatalogLogEntry::remove("ns_01JQXYZ123");
+        let entry = LongEntry::remove("ns_01JQXYZ123");
         let bytes = entry.to_bytes().unwrap();
-        let parsed = CatalogLogEntry::from_bytes(&bytes).unwrap();
+        let parsed = LongEntry::from_bytes(&bytes).unwrap();
 
         match parsed.action {
-            CatalogAction::Remove { namespace_id } => assert_eq!(namespace_id, "ns_01JQXYZ123"),
+            Action::Remove { namespace_id } => assert_eq!(namespace_id, "ns_01JQXYZ123"),
             _ => panic!("Expected Remove action"),
         }
     }
@@ -290,15 +287,15 @@ mod tests {
     #[test]
     fn test_catalog_state_from_snapshot_and_log() {
         let ns1 = NamespaceInfo::new("service_a");
-        let snapshot = CatalogSnapshot::new(vec![ns1.clone()]);
+        let snapshot = Snapshot::new(vec![ns1.clone()]);
 
         let ns2 = NamespaceInfo::new("service_b");
         let log = vec![
-            CatalogLogEntry::add(ns2.clone()),
-            CatalogLogEntry::remove(ns1.id.clone()),
+            LongEntry::add(ns2.clone()),
+            LongEntry::remove(ns1.id.clone()),
         ];
 
-        let state = CatalogState::from_snapshot_and_log(&snapshot, &log);
+        let state = State::from_snapshot_and_log(&snapshot, &log);
 
         assert_eq!(state.len(), 1);
         assert!(state.get_by_name("service_a").is_none());
@@ -307,9 +304,9 @@ mod tests {
 
     #[test]
     fn test_catalog_state_to_snapshot() {
-        let mut state = CatalogState::new();
+        let mut state = State::new();
         let ns = NamespaceInfo::new("my_service");
-        state.apply(&CatalogAction::Add {
+        state.apply(&Action::Add {
             namespace: ns.clone(),
         });
 
