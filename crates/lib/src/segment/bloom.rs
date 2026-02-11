@@ -188,7 +188,11 @@ mod tests {
         }
 
         // Should be around 1% (10 +/- some variance)
-        assert!(false_positives < 50, "Too many false positives: {}", false_positives);
+        assert!(
+            false_positives < 50,
+            "Too many false positives: {}",
+            false_positives
+        );
     }
 
     #[test]

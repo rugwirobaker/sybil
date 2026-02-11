@@ -36,7 +36,10 @@ pub fn read_varint<R: Read>(mut r: R) -> io::Result<u64> {
         }
         shift += 7;
         if shift >= 64 {
-            return Err(io::Error::new(io::ErrorKind::InvalidData, "varint too long"));
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "varint too long",
+            ));
         }
     }
     Ok(result)

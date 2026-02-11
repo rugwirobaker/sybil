@@ -43,7 +43,7 @@ use std::io::{self, Cursor, Write};
 
 use super::bloom::BloomFilter;
 use super::dictionary::Dictionary;
-use super::entry::{ProcessedEntry, PresenceBitmap, AUTO_INDEX_FIELDS};
+use super::entry::{PresenceBitmap, ProcessedEntry, AUTO_INDEX_FIELDS};
 use super::footer::{compute_checksum, FOOTER_SIZE};
 
 pub struct Builder {
@@ -197,10 +197,16 @@ mod tests {
         let mut builder = Builder::new();
 
         builder
-            .add(1705323600000, br#"{"level":"error","service":"api","message":"test"}"#)
+            .add(
+                1705323600000,
+                br#"{"level":"error","service":"api","message":"test"}"#,
+            )
             .unwrap();
         builder
-            .add(1705323600100, br#"{"level":"warn","service":"api","message":"another"}"#)
+            .add(
+                1705323600100,
+                br#"{"level":"warn","service":"api","message":"another"}"#,
+            )
             .unwrap();
 
         assert_eq!(builder.len(), 2);

@@ -65,7 +65,10 @@ impl SegmentFooter {
         if magic != MAGIC {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidData,
-                format!("invalid magic: expected 0x{:08X}, got 0x{:08X}", MAGIC, magic),
+                format!(
+                    "invalid magic: expected 0x{:08X}, got 0x{:08X}",
+                    MAGIC, magic
+                ),
             ));
         }
 

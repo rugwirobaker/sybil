@@ -342,8 +342,14 @@ mod tests {
 
         assert_eq!(entry.actions.len(), 3);
         assert!(matches!(&entry.actions[0], ManifestAction::Add { .. }));
-        assert!(matches!(&entry.actions[1], ManifestAction::Supersede { .. }));
-        assert!(matches!(&entry.actions[2], ManifestAction::Supersede { .. }));
+        assert!(matches!(
+            &entry.actions[1],
+            ManifestAction::Supersede { .. }
+        ));
+        assert!(matches!(
+            &entry.actions[2],
+            ManifestAction::Supersede { .. }
+        ));
     }
 
     #[test]

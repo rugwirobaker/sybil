@@ -120,10 +120,16 @@ mod tests {
     fn test_reader_roundtrip() {
         let mut builder = Builder::new();
         builder
-            .add(1705323600000, br#"{"level":"error","service":"api","message":"hello"}"#)
+            .add(
+                1705323600000,
+                br#"{"level":"error","service":"api","message":"hello"}"#,
+            )
             .unwrap();
         builder
-            .add(1705323600100, br#"{"level":"warn","service":"web","message":"world"}"#)
+            .add(
+                1705323600100,
+                br#"{"level":"warn","service":"web","message":"world"}"#,
+            )
             .unwrap();
 
         let segment = builder.build().unwrap();

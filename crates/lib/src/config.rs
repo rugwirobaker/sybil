@@ -196,8 +196,7 @@ impl Config {
         let content = std::fs::read_to_string(path.as_ref())
             .map_err(|e| ConfigError::ReadError(e.to_string()))?;
 
-        toml::from_str(&content)
-            .map_err(|e| ConfigError::ParseError(e.to_string()))
+        toml::from_str(&content).map_err(|e| ConfigError::ParseError(e.to_string()))
     }
 }
 

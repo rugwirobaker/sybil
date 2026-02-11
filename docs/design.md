@@ -253,22 +253,27 @@ L0 segments are small (64-128KB) to benefit from Tigris object inlining. No inte
 │ Log Entries (zstd compressed)          │
 │ ┌────────────────────────────────────┐ │
 │ │ Entry 0                            │ │
-│ │   timestamp_delta: varint          │ │
-│ │   presence_bitmap: u16             │ │
-│ │   dict_ids: [varint, ...]          │ │
-│ │   payload_len: varint              │ │
-│ │   payload: bytes (original JSON)   │ │
+│ │   timestamp_delta: i32 LE          │ │
+│ │   presence_bitmap: u16 LE          │ │
+│ │   dict_ids: [u32 LE] × popcount    │ │
+│ │   payload_len: u32 LE              │ │
+│ │   payload: [u8] × payload_len      │ │
 │ ├────────────────────────────────────┤ │
 │ │ Entry 1 ... Entry N                │ │
 │ └────────────────────────────────────┘ │
 ├────────────────────────────────────────┤
 │ Dictionary                             │
-│   entry_count: varint                  │
-│   [len: varint, value: bytes] × N      │
+│   entry_count: u32 LE                  │
+│   For each entry:                      │
+│     len: u16 LE                        │
+│     value: [u8] × len                  │
 ├────────────────────────────────────────┤
 │ Bloom Filters (one per indexed field)  │
 │   filter_count: u8                     │
-│   [field_id: u8, len: u16, bits] × N   │
+│   For each filter:                     │
+│     field_id: u8                       │
+│     len: u16 LE                        │
+│     bits: [u8] × len                   │
 ├────────────────────────────────────────┤
 │ Footer (40 bytes, fixed)               │
 │   log_count: u32                       │
@@ -332,39 +337,29 @@ Each log entry within a segment:
 
 ```
 ┌────────────────────────────────────────┐
-│ timestamp_delta: zigzag varint         │  Delta from segment/block min_timestamp
+│ timestamp_delta: i32 LE                │  Delta from segment/block min_timestamp
 ├────────────────────────────────────────┤
-│ presence_bitmap: u16                   │  Which auto-indexed fields exist
+│ presence_bitmap: u16 LE                │  Which auto-indexed fields exist
 ├────────────────────────────────────────┤
-│ dict_ids: [varint, ...]                │  Dictionary IDs for present fields
+│ dict_ids: [u32 LE] × popcount(bitmap)  │  Dictionary IDs for present fields
 ├────────────────────────────────────────┤
-│ payload_len: varint                    │
+│ payload_len: u32 LE                    │  Length of payload in bytes
 ├────────────────────────────────────────┤
-│ payload: bytes                         │  Original JSON log line
+│ payload: [u8] × payload_len            │  Original JSON log line
 └────────────────────────────────────────┘
 ```
 
-**Timestamp delta encoding:** Uses zigzag-encoded varints to handle slightly out-of-order logs. Delta from base timestamp keeps values small (typically 1-2 bytes).
+**Timestamp delta:** Signed i32 handles deltas of ±24 days in milliseconds, far exceeding any segment's time span. Negative deltas accommodate out-of-order logs.
 
-**Dictionary encoding:** Field values are deduplicated within a segment/block. Entries store small integer IDs instead of repeated strings.
+**Dictionary encoding:** Field values are deduplicated within a segment/block. Entries store u32 IDs instead of repeated strings.
 
-**Presence bitmap:** Bit N indicates whether auto-indexed field N exists in this log. Allows skipping absent fields without parsing.
+**Presence bitmap:** Bit N indicates whether auto-indexed field N exists. The number of dict_ids equals `popcount(bitmap)`.
 
-#### **3.7 Varint Encoding**
+#### **3.7 Byte Order**
 
-Variable-length integers using MSB as continuation flag:
+All multi-byte integers use **little-endian** (LE) encoding. This matches the native byte order of x86/x64 and ARM, avoiding byte swapping overhead.
 
-| Value Range | Bytes |
-|-------------|-------|
-| 0-127 | 1 |
-| 128-16,383 | 2 |
-| 16,384-2,097,151 | 3 |
-
-**Zigzag encoding** for signed integers (timestamp deltas):
-- Encode: `(n << 1) ^ (n >> 63)`
-- Decode: `(n >> 1) ^ -(n & 1)`
-
-This maps small negative values to small unsigned values.
+Length-prefixed fields follow the pattern `[len][data]` where length precedes the variable-length data it describes.
 
 #### **3.8 Write Path**
 

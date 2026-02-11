@@ -334,11 +334,7 @@ pub mod object_store_tests {
             .unwrap();
 
         // From byte 6 to end = "world"
-        let data = h
-            .store()
-            .get_range(&key, ByteRange::From(6))
-            .await
-            .unwrap();
+        let data = h.store().get_range(&key, ByteRange::From(6)).await.unwrap();
         assert_eq!(data, Bytes::from("world"));
     }
 
@@ -384,9 +380,7 @@ pub mod object_store_tests {
         assert_eq!(data, Bytes::from("hello"));
     }
 
-    pub async fn test_get_range_invalid_start_greater_than_end<S: ObjectStore>(
-        h: &TestHarness<S>,
-    ) {
+    pub async fn test_get_range_invalid_start_greater_than_end<S: ObjectStore>(h: &TestHarness<S>) {
         let key = h.key("range-invalid-order.txt");
         h.store().put(&key, Bytes::from("hello")).await.unwrap();
 
