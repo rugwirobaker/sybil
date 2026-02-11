@@ -138,7 +138,7 @@ The system consists of three stateless, independently scalable components that u
 
 - Incoming logs buffered in an in-memory memtable (sorted by timestamp)
 - Flush triggered by size threshold OR time window
-- Target segment size: TBD — Tigris inlines objects up to ~100KB (FoundationDB metadata limit), hedwig used 512KB. Requires benchmarking with [ycsb-benchmarks](https://github.com/tigrisdata-community/ycsb-benchmarks).
+- Target segment size: ≤64KB — Tigris inlines objects up to 64KB (confirmed: "anything smaller than the memory space of the Commodore 64"). Larger objects bypass the inline optimization.
 - S3 bandwidth is expensive; batching amortizes cost
 
 **Indexing on write:** Auto-indexed fields are extracted, dictionary-encoded, and bloom filters built during segment creation. No async indexing step needed.
@@ -213,7 +213,7 @@ Segments are organized into three levels, inspired by LSM trees:
 
 | Level | Size | Structure | Dictionary | Purpose |
 |-------|------|-----------|------------|---------|
-| L0 | 64-128KB | Flat (no blocks) | Per-segment | Fresh writes, Tigris-inlined |
+| L0 | ≤64KB | Flat (no blocks) | Per-segment | Fresh writes, Tigris-inlined |
 | L1 | ~32MB | 64KB blocks | Per-block | Hourly compacted |
 | L2 | ~256MB | 64KB blocks | Per-block | Daily compacted, archival |
 
@@ -246,7 +246,7 @@ All data for a namespace lives under `/namespaces/{namespace_id}/`, making it ea
 
 #### **3.4 L0 Segment Format**
 
-L0 segments are small (64-128KB) to benefit from Tigris object inlining. No internal block structure—the entire segment is the unit of I/O.
+L0 segments are small (≤64KB) to benefit from Tigris object inlining. No internal block structure—the entire segment is the unit of I/O.
 
 ```
 ┌────────────────────────────────────────┐
@@ -289,7 +289,7 @@ L0 segments are small (64-128KB) to benefit from Tigris object inlining. No inte
 
 **Read sequence:** Fetch footer (last 40 bytes) → validate magic/checksum → fetch dictionary → fetch bloom filters → check blooms → fetch and scan entries if needed.
 
-**For L0 segments:** Since they're small (64-128KB), fetch the entire segment in one S3 GET request.
+**For L0 segments:** Since they're small (≤64KB), fetch the entire segment in one S3 GET request.
 
 #### **3.5 L1/L2 Segment Format**
 
@@ -368,7 +368,7 @@ JSON logs → In-memory buffer → Build segment → S3 PUT → Update catalog
 ```
 
 **Flush triggers:**
-- Buffer size ≥ 64KB (compressed), OR
+- Estimated segment size ≥ 48KB (leaves headroom for dictionary, blooms, footer to stay ≤64KB), OR
 - Oldest log in buffer > 10 seconds
 
 **Durability:** No WAL. Accept loss of buffered logs on crash. Logs are best-effort; high-stake events typically repeat.
@@ -834,7 +834,7 @@ struct ProcessedEntry {
 
 ```rust
 fn should_flush(buffer: &NamespaceBuffer) -> bool {
-    buffer.estimated_compressed_size >= 64 * 1024           // 64KB size threshold
+    buffer.estimated_segment_size >= 48 * 1024              // 48KB threshold (≤64KB final segment)
         || buffer.oldest_entry_time.elapsed() > Duration::from_secs(10)  // 10s time threshold
 }
 ```
@@ -2165,7 +2165,7 @@ Target: Segment not cached, requires S3 fetch.
 | 1. Parse + Plan | Same as hot | ~1ms | 1ms |
 | 2. Manifest | ETag validation (S3 HEAD) | ~10ms | 11ms |
 | 3. Bloom check | Fetch footer if not cached | ~15ms | 26ms |
-| 4. S3 fetch | GET segment (~128KB L0) | ~20ms | 46ms |
+| 4. S3 fetch | GET segment (≤64KB L0) | ~20ms | 46ms |
 | 5. Decompress | Zstd decode | ~2ms | 48ms |
 | 6. Scan + filter | Same as hot | ~2ms | 50ms |
 | 7. Serialize | JSON response | ~0.5ms | 50.5ms |
@@ -2199,7 +2199,7 @@ The 10-second flush window dominates. Actual P50 is much lower (size-based flush
 | Parameter | Value |
 |-----------|-------|
 | Average log size | ~500 bytes |
-| L0 segment size | 64KB compressed |
+| L0 segment size | ≤64KB (inlined) |
 | Logs per segment | ~200 (after compression) |
 | S3 PUT latency | ~30ms |
 | Segment builds/sec | ~30 |

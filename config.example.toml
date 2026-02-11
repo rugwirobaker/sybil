@@ -12,8 +12,10 @@ port = 8080
 [indexer]
 # Maximum time before flushing buffer to S3 (seconds)
 flush_interval_secs = 10
-# Target L0 segment size (bytes)
-segment_size_bytes = 65536  # 64KB
+# Target L0 segment size threshold (bytes).
+# 48KB leaves headroom for dictionary, blooms, and footer so final segments
+# stay ≤64KB to benefit from Tigris object inlining.
+segment_size_bytes = 49152  # 48KB
 
 [querier]
 # NVMe cache directory path

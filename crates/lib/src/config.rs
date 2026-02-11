@@ -57,7 +57,10 @@ pub struct IndexerConfig {
     #[serde(default = "default_flush_interval")]
     pub flush_interval_secs: u64,
 
-    /// Target L0 segment size (bytes).
+    /// Target L0 segment size threshold (bytes).
+    ///
+    /// Set to 48KB to ensure final segments stay ≤64KB after adding dictionary,
+    /// bloom filters, and footer. Tigris inlines objects ≤64KB for lower latency.
     #[serde(default = "default_segment_size")]
     pub segment_size_bytes: usize,
 }
@@ -111,7 +114,9 @@ fn default_flush_interval() -> u64 {
 }
 
 fn default_segment_size() -> usize {
-    64 * 1024 // 64KB
+    // 48KB threshold leaves ~16KB headroom for dictionary, bloom filters, and footer.
+    // This ensures final L0 segments stay ≤64KB to benefit from Tigris object inlining.
+    48 * 1024
 }
 
 fn default_cache_dir() -> String {
