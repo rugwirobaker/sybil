@@ -143,7 +143,7 @@ impl ObjectStore for S3Store {
                 if start > end {
                     return Err(StorageError::invalid_range(
                         key,
-                        format!("start ({}) > end ({})", start, end),
+                        format!("start ({start}) > end ({end})"),
                     ));
                 }
                 // object_store uses exclusive end, our API uses inclusive end
@@ -157,7 +157,7 @@ impl ObjectStore for S3Store {
                 if offset as usize >= size {
                     return Err(StorageError::invalid_range(
                         key,
-                        format!("offset {} >= object size {}", offset, size),
+                        format!("offset {offset} >= object size {size}"),
                     ));
                 }
 
@@ -170,11 +170,8 @@ impl ObjectStore for S3Store {
 
                 let size = self.object_size(key).await?;
 
-                let start = if len as usize > size {
-                    0 // S3 behavior: return entire object if suffix > size
-                } else {
-                    size - len as usize
-                };
+                // S3 behavior: return entire object if suffix > size
+                let start = size.saturating_sub(len as usize);
 
                 self.inner.get_range(&path, start..size).await
             }

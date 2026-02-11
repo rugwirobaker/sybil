@@ -2,10 +2,10 @@
 //!
 //! Used to quickly check if a segment might contain a value for an indexed
 //! field. False positives are possible, but false negatives are not.
+//!
+//! All multi-byte integers use little-endian encoding.
 
 use std::io::{self, Read, Write};
-
-use super::varint::{read_varint, write_varint};
 
 /// A simple bloom filter implementation.
 #[derive(Debug, Clone)]
@@ -93,24 +93,42 @@ impl BloomFilter {
     }
 
     /// Serialize the bloom filter.
-    /// Format: num_bits: varint, num_hashes: varint, bits: [u64 LE]
+    ///
+    /// Format (all integers little-endian):
+    /// - len: u16 LE (byte length of bits)
+    /// - bits: [u8] × len
+    ///
+    /// Note: num_hashes is fixed at 7 (optimal for 10 bits/item) and not stored.
+    /// num_bits is derived from len * 8.
     pub fn write_to<W: Write>(&self, mut w: W) -> io::Result<usize> {
         let mut written = 0;
-        written += write_varint(&mut w, self.num_bits as u64)?;
-        written += write_varint(&mut w, self.num_hashes as u64)?;
+
+        // Byte length as u16 LE
+        let byte_len = (self.bits.len() * 8) as u16;
+        w.write_all(&byte_len.to_le_bytes())?;
+        written += 2;
+
+        // Raw bits as bytes
         for &word in &self.bits {
             w.write_all(&word.to_le_bytes())?;
             written += 8;
         }
+
         Ok(written)
     }
 
     /// Deserialize a bloom filter.
     pub fn read_from<R: Read>(mut r: R) -> io::Result<Self> {
-        let num_bits = read_varint(&mut r)? as usize;
-        let num_hashes = read_varint(&mut r)? as u32;
-        let num_words = num_bits / 64;
+        // Byte length (u16 LE)
+        let mut len_bytes = [0u8; 2];
+        r.read_exact(&mut len_bytes)?;
+        let byte_len = u16::from_le_bytes(len_bytes) as usize;
 
+        // Derive num_bits and num_words from byte length
+        let num_bits = byte_len * 8;
+        let num_words = byte_len / 8;
+
+        // Read bits as u64 words
         let mut bits = vec![0u64; num_words];
         for word in &mut bits {
             let mut buf = [0u8; 8];
@@ -121,16 +139,14 @@ impl BloomFilter {
         Ok(Self {
             bits,
             num_bits,
-            num_hashes,
+            num_hashes: 7, // Fixed: optimal for 10 bits/item
         })
     }
 
     /// Get the size in bytes when serialized.
     pub fn size_bytes(&self) -> usize {
-        // varints + bits
-        super::varint::varint_size(self.num_bits as u64)
-            + super::varint::varint_size(self.num_hashes as u64)
-            + self.bits.len() * 8
+        // u16 length prefix + bits
+        2 + self.bits.len() * 8
     }
 }
 

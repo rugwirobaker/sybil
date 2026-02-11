@@ -54,9 +54,10 @@ impl SegmentFooter {
     /// Parse footer from a 40-byte slice.
     pub fn from_bytes(data: &[u8]) -> io::Result<Self> {
         if data.len() != FOOTER_SIZE {
+            let len = data.len();
             return Err(io::Error::new(
                 io::ErrorKind::InvalidData,
-                format!("footer must be {} bytes, got {}", FOOTER_SIZE, data.len()),
+                format!("footer must be {FOOTER_SIZE} bytes, got {len}"),
             ));
         }
 
@@ -65,10 +66,7 @@ impl SegmentFooter {
         if magic != MAGIC {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidData,
-                format!(
-                    "invalid magic: expected 0x{:08X}, got 0x{:08X}",
-                    MAGIC, magic
-                ),
+                format!("invalid magic: expected 0x{MAGIC:08X}, got 0x{magic:08X}"),
             ));
         }
 

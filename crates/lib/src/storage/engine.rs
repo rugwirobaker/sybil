@@ -28,9 +28,9 @@ pub enum ByteRange {
 impl std::fmt::Display for ByteRange {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            ByteRange::Range { start, end } => write!(f, "bytes {}-{}", start, end),
-            ByteRange::From(offset) => write!(f, "bytes {}-", offset),
-            ByteRange::Suffix(len) => write!(f, "last {} bytes", len),
+            ByteRange::Range { start, end } => write!(f, "bytes {start}-{end}"),
+            ByteRange::From(offset) => write!(f, "bytes {offset}-"),
+            ByteRange::Suffix(len) => write!(f, "last {len} bytes"),
         }
     }
 }
@@ -93,27 +93,27 @@ impl ObjectKey {
 
     /// L0 segment: `namespaces/{ns}/segments/L0/{hour}/{id}.seg`
     pub fn segment_l0(namespace: &str, hour: &str, id: &str) -> String {
-        format!("namespaces/{}/segments/L0/{}/{}.seg", namespace, hour, id)
+        format!("namespaces/{namespace}/segments/L0/{hour}/{id}.seg")
     }
 
     /// L1 segment: `namespaces/{ns}/segments/L1/{date}/{hour}.seg`
     pub fn segment_l1(namespace: &str, date: &str, hour: &str) -> String {
-        format!("namespaces/{}/segments/L1/{}/{}.seg", namespace, date, hour)
+        format!("namespaces/{namespace}/segments/L1/{date}/{hour}.seg")
     }
 
     /// L2 segment: `namespaces/{ns}/segments/L2/{date}.seg`
     pub fn segment_l2(namespace: &str, date: &str) -> String {
-        format!("namespaces/{}/segments/L2/{}.seg", namespace, date)
+        format!("namespaces/{namespace}/segments/L2/{date}.seg")
     }
 
     /// Prefix for all segments in a namespace.
     pub fn segments_prefix(namespace: &str) -> String {
-        format!("namespaces/{}/segments/", namespace)
+        format!("namespaces/{namespace}/segments/")
     }
 
     /// Prefix for L0 segments in a namespace.
     pub fn segments_l0_prefix(namespace: &str) -> String {
-        format!("namespaces/{}/segments/L0/", namespace)
+        format!("namespaces/{namespace}/segments/L0/")
     }
 
     // ─────────────────────────────────────────────────────────────────────
@@ -122,25 +122,22 @@ impl ObjectKey {
 
     /// Manifest head: `namespaces/{ns}/manifest/head.json`
     pub fn manifest_head(namespace: &str) -> String {
-        format!("namespaces/{}/manifest/head.json", namespace)
+        format!("namespaces/{namespace}/manifest/head.json")
     }
 
     /// Manifest snapshot: `namespaces/{ns}/manifest/snapshot-{ts}.json`
     pub fn manifest_snapshot(namespace: &str, timestamp: &str) -> String {
-        format!(
-            "namespaces/{}/manifest/snapshot-{}.json",
-            namespace, timestamp
-        )
+        format!("namespaces/{namespace}/manifest/snapshot-{timestamp}.json")
     }
 
     /// Manifest log entry: `namespaces/{ns}/manifest/log/{id}.json`
     pub fn manifest_log_entry(namespace: &str, id: &str) -> String {
-        format!("namespaces/{}/manifest/log/{}.json", namespace, id)
+        format!("namespaces/{namespace}/manifest/log/{id}.json")
     }
 
     /// Prefix for manifest log entries.
     pub fn manifest_log_prefix(namespace: &str) -> String {
-        format!("namespaces/{}/manifest/log/", namespace)
+        format!("namespaces/{namespace}/manifest/log/")
     }
 
     // ─────────────────────────────────────────────────────────────────────
@@ -154,12 +151,12 @@ impl ObjectKey {
 
     /// Catalog snapshot: `metadata/snapshots/{ts}.json`
     pub fn catalog_snapshot(timestamp: &str) -> String {
-        format!("metadata/snapshots/{}.json", timestamp)
+        format!("metadata/snapshots/{timestamp}.json")
     }
 
     /// Catalog log entry: `metadata/log/{id}.json`
     pub fn catalog_log_entry(id: &str) -> String {
-        format!("metadata/log/{}.json", id)
+        format!("metadata/log/{id}.json")
     }
 
     // ─────────────────────────────────────────────────────────────────────
@@ -168,6 +165,6 @@ impl ObjectKey {
 
     /// Full-text index: `namespaces/{ns}/indexes/fulltext/{date}.idx`
     pub fn fulltext_index(namespace: &str, date: &str) -> String {
-        format!("namespaces/{}/indexes/fulltext/{}.idx", namespace, date)
+        format!("namespaces/{namespace}/indexes/fulltext/{date}.idx")
     }
 }

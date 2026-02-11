@@ -2,10 +2,10 @@
 //!
 //! Each entry stores: timestamp delta, presence bitmap, dictionary IDs for
 //! indexed fields, and the original JSON payload.
+//!
+//! All multi-byte integers use little-endian encoding.
 
 use std::io::{self, Read, Write};
-
-use super::varint::{read_varint, write_varint, zigzag_decode, zigzag_encode};
 
 /// Fields that are automatically indexed.
 pub const AUTO_INDEX_FIELDS: &[&str] = &[
@@ -80,26 +80,35 @@ pub struct ProcessedEntry {
 
 impl ProcessedEntry {
     /// Encode this entry to a writer.
-    /// Format: timestamp_delta (zigzag varint), presence (u16 LE),
-    ///         dict_ids (varints), payload_len (varint), payload
+    ///
+    /// Format (all integers little-endian):
+    /// - timestamp_delta: i32 LE (delta from base_timestamp in milliseconds)
+    /// - presence_bitmap: u16 LE (which indexed fields are present)
+    /// - dict_ids: [u32 LE] × popcount(presence) (dictionary IDs for present fields)
+    /// - payload_len: u32 LE
+    /// - payload: [u8] × payload_len
     pub fn write_to<W: Write>(&self, mut w: W, base_timestamp: i64) -> io::Result<usize> {
         let mut written = 0;
 
-        // Timestamp delta (zigzag encoded for possible negative deltas)
-        let delta = self.timestamp - base_timestamp;
-        written += write_varint(&mut w, zigzag_encode(delta))?;
+        // Timestamp delta as i32 LE (handles ±24 days in milliseconds)
+        let delta = (self.timestamp - base_timestamp) as i32;
+        w.write_all(&delta.to_le_bytes())?;
+        written += 4;
 
         // Presence bitmap
         w.write_all(&self.presence.0.to_le_bytes())?;
         written += 2;
 
-        // Dictionary IDs for present fields
+        // Dictionary IDs for present fields (u32 LE each)
         for &id in &self.dict_ids {
-            written += write_varint(&mut w, id as u64)?;
+            w.write_all(&id.to_le_bytes())?;
+            written += 4;
         }
 
-        // Payload
-        written += write_varint(&mut w, self.payload.len() as u64)?;
+        // Payload length and payload
+        let payload_len = self.payload.len() as u32;
+        w.write_all(&payload_len.to_le_bytes())?;
+        written += 4;
         w.write_all(&self.payload)?;
         written += self.payload.len();
 
@@ -108,24 +117,30 @@ impl ProcessedEntry {
 
     /// Decode an entry from a reader.
     pub fn read_from<R: Read>(mut r: R, base_timestamp: i64) -> io::Result<Self> {
-        // Timestamp delta
-        let delta = zigzag_decode(read_varint(&mut r)?);
+        // Timestamp delta (i32 LE)
+        let mut delta_bytes = [0u8; 4];
+        r.read_exact(&mut delta_bytes)?;
+        let delta = i32::from_le_bytes(delta_bytes) as i64;
         let timestamp = base_timestamp + delta;
 
-        // Presence bitmap
+        // Presence bitmap (u16 LE)
         let mut presence_bytes = [0u8; 2];
         r.read_exact(&mut presence_bytes)?;
         let presence = PresenceBitmap(u16::from_le_bytes(presence_bytes));
 
-        // Dictionary IDs
+        // Dictionary IDs (u32 LE each)
         let num_ids = presence.count() as usize;
         let mut dict_ids = Vec::with_capacity(num_ids);
         for _ in 0..num_ids {
-            dict_ids.push(read_varint(&mut r)? as u32);
+            let mut id_bytes = [0u8; 4];
+            r.read_exact(&mut id_bytes)?;
+            dict_ids.push(u32::from_le_bytes(id_bytes));
         }
 
-        // Payload
-        let payload_len = read_varint(&mut r)? as usize;
+        // Payload length (u32 LE) and payload
+        let mut len_bytes = [0u8; 4];
+        r.read_exact(&mut len_bytes)?;
+        let payload_len = u32::from_le_bytes(len_bytes) as usize;
         let mut payload = vec![0u8; payload_len];
         r.read_exact(&mut payload)?;
 

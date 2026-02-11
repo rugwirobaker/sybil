@@ -31,7 +31,7 @@ impl MemoryStore {
             .duration_since(UNIX_EPOCH)
             .unwrap()
             .as_nanos();
-        format!("{:x}", nanos)
+        format!("{nanos:x}")
     }
 }
 
@@ -66,7 +66,7 @@ impl ObjectStore for MemoryStore {
                 if start > end {
                     return Err(StorageError::invalid_range(
                         key,
-                        format!("start ({}) > end ({})", start, end),
+                        format!("start ({start}) > end ({end})"),
                     ));
                 }
                 (start, end)
@@ -75,7 +75,7 @@ impl ObjectStore for MemoryStore {
                 if offset >= len {
                     return Err(StorageError::invalid_range(
                         key,
-                        format!("offset {} >= object size {}", offset, len),
+                        format!("offset {offset} >= object size {len}"),
                     ));
                 }
                 (offset, len - 1)
@@ -99,7 +99,7 @@ impl ObjectStore for MemoryStore {
         if start >= len {
             return Err(StorageError::invalid_range(
                 key,
-                format!("start ({}) >= object size ({})", start, len),
+                format!("start ({start}) >= object size ({len})"),
             ));
         }
 

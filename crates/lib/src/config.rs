@@ -2,7 +2,7 @@ use serde::Deserialize;
 use std::path::Path;
 
 /// Top-level configuration for Sybil.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Default, Deserialize)]
 pub struct Config {
     /// Storage configuration (S3/Tigris).
     #[serde(default)]
@@ -131,18 +131,6 @@ fn default_worker_count() -> usize {
 }
 
 // Default trait implementations
-
-impl Default for Config {
-    fn default() -> Self {
-        Self {
-            storage: StorageConfig::default(),
-            server: ServerConfig::default(),
-            indexer: IndexerConfig::default(),
-            querier: QuerierConfig::default(),
-            steward: StewardConfig::default(),
-        }
-    }
-}
 
 impl Default for StorageConfig {
     fn default() -> Self {

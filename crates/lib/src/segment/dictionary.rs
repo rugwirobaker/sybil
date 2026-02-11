@@ -2,11 +2,11 @@
 //!
 //! Field values are deduplicated within a segment. Entries store small integer
 //! IDs instead of repeated strings.
+//!
+//! All multi-byte integers use little-endian encoding.
 
 use std::collections::HashMap;
 use std::io::{self, Read, Write};
-
-use super::varint::{read_varint, write_varint};
 
 /// A dictionary mapping strings to integer IDs and back.
 #[derive(Debug, Clone, Default)]
@@ -48,26 +48,48 @@ impl Dictionary {
     }
 
     /// Serialize the dictionary.
-    /// Format: entry_count: varint, then for each entry: len: varint, bytes
+    ///
+    /// Format (all integers little-endian):
+    /// - entry_count: u32 LE
+    /// - For each entry:
+    ///   - len: u16 LE
+    ///   - value: [u8] × len
     pub fn write_to<W: Write>(&self, mut w: W) -> io::Result<usize> {
         let mut written = 0;
-        written += write_varint(&mut w, self.id_to_string.len() as u64)?;
+
+        // Entry count as u32 LE
+        let count = self.id_to_string.len() as u32;
+        w.write_all(&count.to_le_bytes())?;
+        written += 4;
+
+        // Each entry: u16 LE length prefix + bytes
         for s in &self.id_to_string {
             let bytes = s.as_bytes();
-            written += write_varint(&mut w, bytes.len() as u64)?;
+            let len = bytes.len() as u16;
+            w.write_all(&len.to_le_bytes())?;
+            written += 2;
             w.write_all(bytes)?;
             written += bytes.len();
         }
+
         Ok(written)
     }
 
     /// Deserialize a dictionary.
     pub fn read_from<R: Read>(mut r: R) -> io::Result<Self> {
-        let count = read_varint(&mut r)? as usize;
+        // Entry count (u32 LE)
+        let mut count_bytes = [0u8; 4];
+        r.read_exact(&mut count_bytes)?;
+        let count = u32::from_le_bytes(count_bytes) as usize;
+
         let mut dict = Dictionary::new();
 
         for _ in 0..count {
-            let len = read_varint(&mut r)? as usize;
+            // String length (u16 LE)
+            let mut len_bytes = [0u8; 2];
+            r.read_exact(&mut len_bytes)?;
+            let len = u16::from_le_bytes(len_bytes) as usize;
+
             let mut buf = vec![0u8; len];
             r.read_exact(&mut buf)?;
             let s = String::from_utf8(buf)
