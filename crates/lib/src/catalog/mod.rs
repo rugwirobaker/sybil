@@ -51,7 +51,7 @@ impl Head {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Snapshot {
     pub created_at: DateTime<Utc>,
-    pub namespaces: Vec<NamespaceInfo>,
+    pub namespaces: Vec<Namespace>,
 }
 
 impl Snapshot {
@@ -62,7 +62,7 @@ impl Snapshot {
         }
     }
 
-    pub fn new(namespaces: Vec<NamespaceInfo>) -> Self {
+    pub fn new(namespaces: Vec<Namespace>) -> Self {
         Self {
             created_at: Utc::now(),
             namespaces,
@@ -80,7 +80,7 @@ impl Snapshot {
 
 /// Information about a namespace.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct NamespaceInfo {
+pub struct Namespace {
     /// Unique namespace ID (e.g., "ns_01JQXYZ123ABCDEFGHJKMNPQRS").
     pub id: String,
     /// Human-readable name used in SQL FROM clause.
@@ -94,7 +94,7 @@ fn default_retention_days() -> u32 {
     7
 }
 
-impl NamespaceInfo {
+impl Namespace {
     pub fn new(name: impl Into<String>) -> Self {
         Self {
             id: generate_namespace_id(),
@@ -127,7 +127,7 @@ pub struct LongEntry {
 }
 
 impl LongEntry {
-    pub fn add(namespace: NamespaceInfo) -> Self {
+    pub fn add(namespace: Namespace) -> Self {
         Self {
             id: ulid::Ulid::new().to_string(),
             timestamp: Utc::now(),
@@ -157,15 +157,15 @@ impl LongEntry {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum Action {
-    Add { namespace: NamespaceInfo },
+    Add { namespace: Namespace },
     Remove { namespace_id: String },
 }
 
 /// Computed catalog state after applying log entries to a snapshot.
 #[derive(Debug, Clone, Default)]
 pub struct State {
-    namespaces_by_name: std::collections::HashMap<String, NamespaceInfo>,
-    namespaces_by_id: std::collections::HashMap<String, NamespaceInfo>,
+    namespaces_by_name: std::collections::HashMap<String, Namespace>,
+    namespaces_by_id: std::collections::HashMap<String, Namespace>,
 }
 
 impl State {
@@ -191,7 +191,7 @@ impl State {
         }
     }
 
-    fn insert(&mut self, namespace: NamespaceInfo) {
+    fn insert(&mut self, namespace: Namespace) {
         self.namespaces_by_name
             .insert(namespace.name.clone(), namespace.clone());
         self.namespaces_by_id
@@ -204,15 +204,15 @@ impl State {
         }
     }
 
-    pub fn get_by_name(&self, name: &str) -> Option<&NamespaceInfo> {
+    pub fn get_by_name(&self, name: &str) -> Option<&Namespace> {
         self.namespaces_by_name.get(name)
     }
 
-    pub fn get_by_id(&self, id: &str) -> Option<&NamespaceInfo> {
+    pub fn get_by_id(&self, id: &str) -> Option<&Namespace> {
         self.namespaces_by_id.get(id)
     }
 
-    pub fn list(&self) -> impl Iterator<Item = &NamespaceInfo> {
+    pub fn list(&self) -> impl Iterator<Item = &Namespace> {
         self.namespaces_by_name.values()
     }
 
@@ -235,7 +235,7 @@ mod tests {
 
     #[test]
     fn test_namespace_info_creation() {
-        let ns = NamespaceInfo::new("api_gateway");
+        let ns = Namespace::new("api_gateway");
         assert!(ns.id.starts_with("ns_"));
         assert_eq!(ns.name, "api_gateway");
         assert_eq!(ns.retention_days, 7);
@@ -251,7 +251,7 @@ mod tests {
 
     #[test]
     fn test_catalog_snapshot_serialization() {
-        let ns = NamespaceInfo::new("test_namespace");
+        let ns = Namespace::new("test_namespace");
         let snapshot = Snapshot::new(vec![ns.clone()]);
         let bytes = snapshot.to_bytes().unwrap();
         let parsed = Snapshot::from_bytes(&bytes).unwrap();
@@ -261,7 +261,7 @@ mod tests {
 
     #[test]
     fn test_catalog_log_entry_add() {
-        let ns = NamespaceInfo::new("my_app");
+        let ns = Namespace::new("my_app");
         let entry = LongEntry::add(ns.clone());
         let bytes = entry.to_bytes().unwrap();
         let parsed = LongEntry::from_bytes(&bytes).unwrap();
@@ -286,10 +286,10 @@ mod tests {
 
     #[test]
     fn test_catalog_state_from_snapshot_and_log() {
-        let ns1 = NamespaceInfo::new("service_a");
+        let ns1 = Namespace::new("service_a");
         let snapshot = Snapshot::new(vec![ns1.clone()]);
 
-        let ns2 = NamespaceInfo::new("service_b");
+        let ns2 = Namespace::new("service_b");
         let log = vec![
             LongEntry::add(ns2.clone()),
             LongEntry::remove(ns1.id.clone()),
@@ -305,7 +305,7 @@ mod tests {
     #[test]
     fn test_catalog_state_to_snapshot() {
         let mut state = State::new();
-        let ns = NamespaceInfo::new("my_service");
+        let ns = Namespace::new("my_service");
         state.apply(&Action::Add {
             namespace: ns.clone(),
         });

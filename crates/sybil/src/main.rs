@@ -49,9 +49,12 @@ impl Cli {
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    // Initialize tracing
+    // Initialize tracing with a sensible default if RUST_LOG is not set
     tracing_subscriber::registry()
-        .with(tracing_subscriber::EnvFilter::from_default_env())
+        .with(
+            tracing_subscriber::EnvFilter::try_from_default_env()
+                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),
+        )
         .with(tracing_subscriber::fmt::layer().json())
         .init();
 
@@ -69,27 +72,23 @@ async fn main() -> Result<()> {
         anyhow::anyhow!("must specify a mode: --indexer, --querier, or --steward")
     })?;
 
-    tracing::info!(?mode, "starting sybil");
+    tracing::info!(?mode, version = env!("CARGO_PKG_VERSION"), "starting sybil");
+
+    // Create shared storage from config
+    let storage = lib::storage::from_config(&config.storage)?;
+    tracing::info!(backend = ?config.storage.backend, "storage initialized");
 
     match mode {
         Mode::Indexer => {
-            tracing::info!(
-                host = %config.server.host,
-                port = %config.server.port,
-                "starting indexer"
-            );
-            indexer::run(config).await?;
+            let service = indexer::IndexerService::new(config, storage)
+                .await
+                .map_err(|e| anyhow::anyhow!(e))?;
+            service.run().await.map_err(|e| anyhow::anyhow!(e))?;
         }
         Mode::Querier => {
-            tracing::info!(
-                host = %config.server.host,
-                port = %config.server.port,
-                "starting querier"
-            );
             querier::run(config).await?;
         }
         Mode::Steward => {
-            tracing::info!("starting steward");
             steward::run(config).await?;
         }
     }

@@ -126,11 +126,11 @@ impl CatalogCache {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::catalog::NamespaceInfo;
+    use crate::catalog::Namespace;
 
     fn make_catalog() -> CachedCatalog {
         let head = Head::new("snapshots/test.json".to_string());
-        let snapshot = Snapshot::new(vec![NamespaceInfo::new("test_ns")]);
+        let snapshot = Snapshot::new(vec![Namespace::new("test_ns")]);
         CachedCatalog::new(head, Some("etag-456".to_string()), snapshot, vec![])
     }
 
