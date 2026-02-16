@@ -1,4 +1,6 @@
 /target
 /*.creds
 .claude
+.venv
 config.toml
+data/

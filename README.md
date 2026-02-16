@@ -31,7 +31,11 @@ debug = true
 
 # Storage configuration (choose one backend)
 [storage]
-backend = "memory"  # "memory" or "s3"
+backend = "memory"  # "memory", "s3", or "filesystem"
+
+# Filesystem storage for local development (when backend = "filesystem")
+# [storage.filesystem]
+# root = "./data"
 
 # S3-compatible storage configuration (when backend = "s3")
 [storage.s3]
@@ -125,3 +129,60 @@ Returns `202 Accepted` with `{"accepted": <count>}`.
 curl http://localhost:9080/health   # liveness
 curl http://localhost:9080/ready    # readiness
 ```
+
+## Inspecting Segments
+
+Segment files (`.seg`) are binary. The catalog (`metadata/`), manifests, and log entries are plain JSON and can be read directly. For segments, use the included inspection script.
+
+### Setup
+
+```sh
+uv venv .venv
+uv pip install --python .venv/bin/python zstandard
+```
+
+### Usage
+
+```sh
+# Full dump (footer, section map, dictionary, bloom filters, entries)
+.venv/bin/python3 scripts/inspect-segment.py path/to/segment.seg
+
+# Individual sections
+.venv/bin/python3 scripts/inspect-segment.py segment.seg --footer     # metadata & timestamps
+.venv/bin/python3 scripts/inspect-segment.py segment.seg --map        # section byte offsets
+.venv/bin/python3 scripts/inspect-segment.py segment.seg --dict       # string dictionary
+.venv/bin/python3 scripts/inspect-segment.py segment.seg --blooms     # bloom filter stats
+.venv/bin/python3 scripts/inspect-segment.py segment.seg --entries    # decoded log entries
+.venv/bin/python3 scripts/inspect-segment.py segment.seg --hex-footer # raw footer hex
+```
+
+### Quick inspection with xxd
+
+The footer is always the last 40 bytes of the file. You can check it without any dependencies:
+
+```sh
+# Verify magic bytes (should show "LBYS" — little-endian "SYBL")
+xxd -s -4 -l 4 segment.seg
+
+# Dump the full 40-byte footer
+xxd -s -40 -l 40 segment.seg
+```
+
+### L0 segment layout
+
+```
+[Compressed Entries][Dictionary][Bloom Filters][Footer (40 bytes)]
+```
+
+The footer (last 40 bytes, all little-endian) contains:
+
+| Offset | Field            | Type   | Description                          |
+|--------|------------------|--------|--------------------------------------|
+| 0      | log_count        | u32    | Number of log entries                |
+| 4      | min_timestamp    | i64    | Earliest timestamp (epoch ms)        |
+| 12     | max_timestamp    | i64    | Latest timestamp (epoch ms)          |
+| 20     | entries_size     | u32    | Compressed entries byte length       |
+| 24     | dictionary_offset| u32    | Byte offset of dictionary section    |
+| 28     | bloom_offset     | u32    | Byte offset of bloom filter section  |
+| 32     | checksum         | u32    | CRC32 of file[0..file_len-8]         |
+| 36     | magic            | u32    | `0x5359424C` (ASCII "SYBL")          |
