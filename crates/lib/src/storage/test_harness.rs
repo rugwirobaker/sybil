@@ -74,7 +74,7 @@ impl<S: ObjectStore> TestHarness<S> {
     /// Generate a unique numbered key (useful for multiple objects).
     pub fn unique_key(&self, base: &str) -> String {
         let n = self.key_counter.fetch_add(1, Ordering::SeqCst);
-        self.key(&format!("{}-{}", base, n))
+        self.key(&format!("{base}-{n}"))
     }
 
     /// Clean up all objects created during the test.
@@ -106,7 +106,7 @@ fn generate_test_prefix() -> String {
         .duration_since(UNIX_EPOCH)
         .unwrap()
         .as_nanos();
-    format!("_test_{:x}/", nanos)
+    format!("_test_{nanos:x}/")
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -263,31 +263,31 @@ pub mod object_store_tests {
         let prefix = h.unique_key("list");
 
         h.store()
-            .put(&format!("{}/1.txt", prefix), Bytes::from("1"))
+            .put(&format!("{prefix}/1.txt"), Bytes::from("1"))
             .await
             .unwrap();
         h.store()
-            .put(&format!("{}/2.txt", prefix), Bytes::from("2"))
+            .put(&format!("{prefix}/2.txt"), Bytes::from("2"))
             .await
             .unwrap();
         h.store()
-            .put(&format!("{}-other/1.txt", prefix), Bytes::from("3"))
+            .put(&format!("{prefix}-other/1.txt"), Bytes::from("3"))
             .await
             .unwrap();
 
-        let mut keys = h.store().list(&format!("{}/", prefix)).await.unwrap();
+        let mut keys = h.store().list(&format!("{prefix}/")).await.unwrap();
         keys.sort();
 
         assert_eq!(
             keys,
-            vec![format!("{}/1.txt", prefix), format!("{}/2.txt", prefix)]
+            vec![format!("{prefix}/1.txt"), format!("{}/2.txt", prefix)]
         );
     }
 
     pub async fn test_list_empty<S: ObjectStore>(h: &TestHarness<S>) {
         let prefix = h.unique_key("empty-list");
 
-        let keys = h.store().list(&format!("{}/", prefix)).await.unwrap();
+        let keys = h.store().list(&format!("{prefix}/")).await.unwrap();
 
         assert!(keys.is_empty());
     }

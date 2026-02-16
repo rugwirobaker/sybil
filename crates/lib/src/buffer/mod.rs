@@ -404,11 +404,7 @@ mod tests {
         for i in 0..10 {
             let entry = LogEntry::new(
                 1705323600000 + i,
-                format!(
-                    r#"{{"level":"info","message":"test message number {}"}}"#,
-                    i
-                )
-                .into_bytes(),
+                format!(r#"{{"level":"info","message":"test message number {i}"}}"#,).into_bytes(),
             );
             let decision = manager.add("test-ns", entry).unwrap();
 
@@ -488,7 +484,7 @@ mod tests {
                         let ts = 1705323600000 + (t * 1000 + i) as i64;
                         let entry = LogEntry::new(
                             ts,
-                            format!(r#"{{"thread":{},"index":{}}}"#, t, i).into_bytes(),
+                            format!(r#"{{"thread":{t},"index":{i}}}"#).into_bytes(),
                         );
                         manager.add("shared-ns", entry).unwrap();
                     }
@@ -514,7 +510,7 @@ mod tests {
                     ns,
                     LogEntry::new(
                         1705323600000,
-                        format!(r#"{{"namespace":"{}"}}"#, ns).into_bytes(),
+                        format!(r#"{{"namespace":"{ns}"}}"#).into_bytes(),
                     ),
                 )
                 .unwrap();
@@ -541,7 +537,7 @@ mod tests {
                     "ns-size",
                     LogEntry::new(
                         1705323600000 + i,
-                        format!(r#"{{"message":"large payload {}"}}"#, i).into_bytes(),
+                        format!(r#"{{"message":"large payload {i}"}}"#).into_bytes(),
                     ),
                 )
                 .unwrap();
@@ -585,7 +581,7 @@ mod tests {
             .map(|i| {
                 LogEntry::new(
                     1705323600000 + i * 100,
-                    format!(r#"{{"index":{}}}"#, i).into_bytes(),
+                    format!(r#"{{"index":{i}}}"#).into_bytes(),
                 )
             })
             .collect();

@@ -27,13 +27,17 @@ pub struct Config {
 
 #[derive(Debug, Clone, Default, Deserialize)]
 pub struct StorageConfig {
-    /// Storage backend: "memory" or "s3".
+    /// Storage backend: "memory", "s3", or "filesystem".
     #[serde(default)]
     pub backend: StorageBackend,
 
     /// S3-compatible storage configuration.
     #[serde(default)]
     pub s3: S3Config,
+
+    /// Filesystem storage configuration.
+    #[serde(default)]
+    pub filesystem: FilesystemConfig,
 }
 
 #[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
@@ -42,6 +46,14 @@ pub enum StorageBackend {
     #[default]
     Memory,
     S3,
+    Filesystem,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct FilesystemConfig {
+    /// Root directory for stored objects.
+    #[serde(default = "default_filesystem_root")]
+    pub root: String,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -159,6 +171,10 @@ pub struct StewardConfig {
 
 // Default value functions
 
+fn default_filesystem_root() -> String {
+    "./data".to_string()
+}
+
 fn default_endpoint() -> String {
     "https://fly.storage.tigris.dev".to_string()
 }
@@ -214,6 +230,14 @@ fn default_worker_count() -> usize {
 }
 
 // Default trait implementations
+
+impl Default for FilesystemConfig {
+    fn default() -> Self {
+        Self {
+            root: default_filesystem_root(),
+        }
+    }
+}
 
 impl Default for S3Config {
     fn default() -> Self {

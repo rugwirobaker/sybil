@@ -247,7 +247,7 @@ mod tests {
         for i in 0..10 {
             memtable.add(LogEntry::new(
                 1705323600000 + i * 1000,
-                format!(r#"{{"level":"info","message":"msg {}"}}"#, i).into_bytes(),
+                format!(r#"{{"level":"info","message":"msg {i}"}}"#).into_bytes(),
             ));
         }
 
@@ -301,7 +301,7 @@ mod tests {
                         let ts = 1705323600000 + (t * 1000 + i) as i64;
                         memtable.add(LogEntry::new(
                             ts,
-                            format!(r#"{{"thread":{},"index":{}}}"#, t, i).into_bytes(),
+                            format!(r#"{{"thread":{t},"index":{i}}}"#).into_bytes(),
                         ));
                     }
                 })

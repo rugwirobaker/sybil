@@ -129,7 +129,7 @@ mod tests {
     use crate::catalog::Namespace;
 
     fn make_catalog() -> CachedCatalog {
-        let head = Head::new("snapshots/test.json".to_string());
+        let head = Head::new("snapshots/test.json");
         let snapshot = Snapshot::new(vec![Namespace::new("test_ns")]);
         CachedCatalog::new(head, Some("etag-456".to_string()), snapshot, vec![])
     }

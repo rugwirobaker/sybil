@@ -73,7 +73,7 @@ mod tests {
 
     #[test]
     fn test_buffer_error_io() {
-        let io_err = io::Error::new(io::ErrorKind::Other, "disk full");
+        let io_err = io::Error::other("disk full");
         let err: BufferError = io_err.into();
         assert!(!err.is_entry_too_large());
     }

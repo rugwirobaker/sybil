@@ -10,6 +10,8 @@ use lib::storage::{ObjectKey, ObjectStore};
 
 use crate::error::IndexerError;
 
+use tracing::{debug, info, warn};
+
 /// Shared state for the indexer service.
 #[derive(Clone)]
 pub struct IndexerState {
@@ -28,12 +30,12 @@ impl IndexerState {
     pub async fn ensure_catalog(&self) -> Result<CatalogState, IndexerError> {
         // Fast path: cache hit
         if let Some(state) = self.cache.catalog.get_state() {
-            tracing::debug!("catalog cache hit");
+            debug!("catalog cache hit");
             return Ok(state);
         }
 
         // Slow path: fetch from S3
-        tracing::info!("catalog cache miss, refreshing from S3");
+        info!("catalog cache miss, refreshing from S3");
         self.refresh_catalog().await
     }
 
@@ -46,14 +48,14 @@ impl IndexerState {
                 .await
                 .map_err(|e| match e {
                     lib::storage::StorageError::NotFound { .. } => {
-                        tracing::warn!("catalog head not found in S3, not initialized yet");
+                        warn!("catalog head not found in S3, not initialized yet");
                         IndexerError::Internal("catalog not initialized".to_string())
                     }
                     other => IndexerError::Storage(other),
                 })?;
 
         let head = catalog::Head::from_bytes(&head_bytes)?;
-        tracing::debug!(
+        debug!(
             log_tail_len = head.log_tail.len(),
             "loaded catalog head from S3"
         );
@@ -76,7 +78,7 @@ impl IndexerState {
         let ns_count = state.list().count();
         self.cache.catalog.set(cached);
 
-        tracing::info!(namespaces = ns_count, "catalog refreshed from S3");
+        info!(namespaces = ns_count, "catalog refreshed from S3");
         Ok(state)
     }
 
@@ -89,7 +91,7 @@ impl IndexerState {
                 Ok(ns)
             }
             None => {
-                tracing::debug!(namespace = %name, "namespace not found");
+                debug!(namespace = %name, "namespace not found");
                 Err(IndexerError::NamespaceNotFound(name.to_string()))
             }
         }
@@ -101,11 +103,11 @@ impl IndexerState {
         name: &str,
         retention_days: u32,
     ) -> Result<Namespace, IndexerError> {
-        tracing::info!(namespace = %name, retention_days, "creating namespace");
+        info!(namespace = %name, retention_days, "creating namespace");
 
         // Validate name
         if !is_valid_namespace_name(name) {
-            tracing::warn!(namespace = %name, "invalid namespace name");
+            warn!(namespace = %name, "invalid namespace name");
             return Err(IndexerError::InvalidNamespaceName(name.to_string()));
         }
 
@@ -169,11 +171,7 @@ impl IndexerState {
         // Initialize empty manifest for the new namespace
         self.init_namespace_manifest(&ns.id).await?;
 
-        tracing::info!(
-            namespace = %name,
-            id = %ns.id,
-            "namespace created"
-        );
+        info!(namespace = %name,id = %ns.id,"namespace created");
 
         Ok(ns)
     }

@@ -75,7 +75,7 @@ async fn main() -> Result<()> {
     tracing::info!(?mode, version = env!("CARGO_PKG_VERSION"), "starting sybil");
 
     // Create shared storage from config
-    let storage = lib::storage::from_config(&config.storage)?;
+    let storage = lib::storage::from_config(&config.storage).await?;
     tracing::info!(backend = ?config.storage.backend, "storage initialized");
 
     match mode {

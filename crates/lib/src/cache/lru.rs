@@ -387,7 +387,7 @@ mod tests {
         }
 
         // Should have some entries (exact count depends on eviction)
-        assert!(lru.len() > 0);
+        assert!(lru.is_empty());
     }
 
     #[test]

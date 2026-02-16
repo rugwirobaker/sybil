@@ -14,6 +14,9 @@
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
+
+pub const VERSION: u32 = 1;
 
 /// The catalog head pointer.
 ///
@@ -29,10 +32,10 @@ pub struct Head {
 }
 
 impl Head {
-    pub fn new(snapshot: String) -> Self {
+    pub fn new(snapshot: impl Into<String>) -> Self {
         Self {
-            version: 1,
-            snapshot,
+            version: VERSION,
+            snapshot: snapshot.into(),
             log_tail: Vec::new(),
         }
     }
@@ -164,8 +167,8 @@ pub enum Action {
 /// Computed catalog state after applying log entries to a snapshot.
 #[derive(Debug, Clone, Default)]
 pub struct State {
-    namespaces_by_name: std::collections::HashMap<String, Namespace>,
-    namespaces_by_id: std::collections::HashMap<String, Namespace>,
+    namespaces_by_name: HashMap<String, Namespace>,
+    namespaces_by_id: HashMap<String, Namespace>,
 }
 
 impl State {
